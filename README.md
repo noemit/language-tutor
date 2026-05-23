@@ -1,36 +1,63 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Language Tutor
 
-## Getting Started
+A personal progressive web app for translating text and automatically generating flashcards to build vocabulary over time.
 
-First, run the development server:
+![Language Tutor](https://img.shields.io/badge/built%20with-Next.js-black?logo=next.js)
+![Firebase](https://img.shields.io/badge/powered%20by-Firebase-orange?logo=firebase)
+![DeepSeek](https://img.shields.io/badge/translation-DeepSeek-blue)
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+## What it does
+
+1. **Translate** — Paste text in Spanish, Romanian, Galician, or English and get a natural translation powered by DeepSeek.
+2. **Auto-generate flashcards** — The LLM intelligently extracts words, phrases, and grammar concepts worth learning and creates flashcards automatically.
+3. **Practice** — Flip through flashcards, self-assess with "Again" or "Good", and track your progress.
+4. **Archive** — Cards you master (7 correct in a row) automatically move to your archive. Restore them anytime if you feel rusty.
+
+## Tech Stack
+
+- **Framework**: Next.js 15 (App Router)
+- **Styling**: Tailwind CSS + shadcn/ui
+- **Auth & Database**: Firebase (Authentication + Firestore)
+- **Translation & Flashcard Generation**: DeepSeek Chat API
+- **PWA**: Installable on iOS and Android
+
+## Languages
+
+| Code | Language | Role |
+|------|----------|------|
+| `es` | Spanish | Default source (what you're learning) |
+| `en` | English | Default target (learning reference) |
+| `ro` | Romanian | Native speaker support |
+| `gl` | Galician | Additional interest |
+
+## Environment Variables
+
+Create a `.env.local` file with:
+
+```env
+DEEPSEEK_API_KEY=your_deepseek_api_key
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Firebase config is baked into the client (safe for client-side use). Firestore security rules should restrict reads/writes to authenticated users.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Development
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+npm install
+npm run dev
+```
 
-## Learn More
+Open [http://localhost:3000](http://localhost:3000).
 
-To learn more about Next.js, take a look at the following resources:
+## Deploy
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+The app is configured for [Vercel](https://vercel.com/).
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+1. Push to GitHub
+2. Import repo in Vercel
+3. Add `DEEPSEEK_API_KEY` environment variable
+4. Enable Google Sign-In in your Firebase project and add your Vercel domain to authorized domains
 
-## Deploy on Vercel
+## PWA Install
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Open the deployed app in Safari (iOS) or Chrome (Android) and tap **Add to Home Screen**.

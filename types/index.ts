@@ -1,0 +1,68 @@
+import { Timestamp } from "firebase/firestore";
+
+export type LanguageCode = "en" | "ro" | "es" | "gl";
+
+export interface LanguageConfig {
+  code: LanguageCode;
+  name: string;
+  flag: string;
+}
+
+export const LANGUAGES: LanguageConfig[] = [
+  { code: "en", name: "English", flag: "🇬🇧" },
+  { code: "ro", name: "Romanian", flag: "🇷🇴" },
+  { code: "es", name: "Spanish", flag: "🇪🇸" },
+  { code: "gl", name: "Galician", flag: "🏴󠁧󠁢󠁧󠁢" },
+];
+
+export const DEFAULT_SOURCE_LANG: LanguageCode = "es";
+export const DEFAULT_TARGET_LANG: LanguageCode = "en";
+
+export interface Translation {
+  id: string;
+  userId: string;
+  sourceText: string;
+  translatedText: string;
+  sourceLang: LanguageCode;
+  targetLang: LanguageCode;
+  rawLlmResponse: string;
+  createdAt: Timestamp;
+  flashcardIds: string[];
+}
+
+export interface Flashcard {
+  id: string;
+  userId: string;
+  front: string;
+  back: string;
+  context?: string;
+  langPair: [LanguageCode, LanguageCode];
+  tags: string[];
+  status: "active" | "archived";
+  createdAt: Timestamp;
+  archivedAt?: Timestamp;
+  totalAttempts: number;
+  correctStreak: number;
+  lastAttemptAt?: Timestamp;
+}
+
+export interface Attempt {
+  id: string;
+  userId: string;
+  cardId: string;
+  correct: boolean;
+  timestamp: Timestamp;
+  direction: "front-to-back" | "back-to-front";
+}
+
+export interface GeneratedFlashcard {
+  front: string;
+  back: string;
+  context?: string;
+  tags: string[];
+}
+
+export interface TranslationResponse {
+  translation: string;
+  flashcards: GeneratedFlashcard[];
+}
