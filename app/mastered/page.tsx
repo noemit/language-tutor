@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { Archive, Loader2, RotateCcw, Search, Trophy } from "lucide-react";
+import { Loader2, RotateCcw, Search, Trophy } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -10,7 +10,7 @@ import { getFlashcards, restoreFlashcard } from "@/lib/db";
 import { Flashcard } from "@/types";
 import { toast } from "sonner";
 
-export default function ArchivePage() {
+export default function MasteredPage() {
   const { user, loading: authLoading } = useAuth();
   const [cards, setCards] = useState<Flashcard[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -23,7 +23,7 @@ export default function ArchivePage() {
       const archived = await getFlashcards(user.uid, "archived");
       setCards(archived);
     } catch (e) {
-      toast.error("Failed to load archive");
+      toast.error("Failed to load mastered cards");
     } finally {
       setIsLoading(false);
     }
@@ -61,8 +61,8 @@ export default function ArchivePage() {
   if (!user) {
     return (
       <div className="flex flex-col flex-1 items-center justify-center px-6 gap-4">
-        <Archive className="w-12 h-12 text-muted-foreground" />
-        <p className="text-muted-foreground">Sign in to view your archive</p>
+        <Trophy className="w-12 h-12 text-muted-foreground" />
+        <p className="text-muted-foreground">Sign in to view your mastered cards</p>
       </div>
     );
   }
@@ -73,7 +73,7 @@ export default function ArchivePage() {
         <Trophy className="w-12 h-12 text-muted-foreground" />
         <div className="text-center">
           <h2 className="text-lg font-semibold text-foreground">
-            Archive is empty
+            Nothing mastered yet
           </h2>
           <p className="text-muted-foreground mt-1">
             Mastered cards will appear here automatically.
@@ -88,7 +88,7 @@ export default function ArchivePage() {
       <div className="flex items-center gap-2">
         <Search className="w-4 h-4 text-muted-foreground absolute ml-3 pointer-events-none" />
         <Input
-          placeholder="Search archive..."
+          placeholder="Search mastered cards..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className="pl-9 h-11 rounded-xl bg-card border-border"

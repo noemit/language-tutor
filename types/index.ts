@@ -66,3 +66,31 @@ export interface TranslationResponse {
   translation: string;
   flashcards: GeneratedFlashcard[];
 }
+
+// --- Concepts ---
+
+export type ConceptStatus = "still-learning" | "confident" | "mastered";
+
+export interface ConceptExample {
+  spanish: string;
+  english: string;
+  explanation?: string;
+}
+
+export interface Concept {
+  id: string;
+  title: string;
+  subtitle: string;
+  category: string;
+  content: string[]; // paragraphs
+  examples: ConceptExample[];
+  tips?: string[];
+}
+
+export interface ConceptProgress {
+  id: string;
+  userId: string;
+  conceptId: string;
+  status: ConceptStatus;
+  updatedAt?: Timestamp;
+}

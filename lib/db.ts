@@ -15,7 +15,7 @@ import {
   DocumentReference,
   DocumentData,
 } from "firebase/firestore";
-import { Flashcard, Attempt, Translation } from "@/types";
+import { Flashcard, Attempt, Translation, ConceptProgress } from "@/types";
 
 function userCollection(userId: string, name: string) {
   return collection(db, "users", userId, name);
@@ -135,4 +135,49 @@ export async function getAttempts(userId: string, cardId?: string): Promise<Atte
   }
   const snapshot = await getDocs(q);
   return snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as Attempt));
+}
+
+// Concept progress
+export async function setConceptProgress(
+  userId: string,
+  conceptId: string,
+  status: ConceptProgress["status"]
+): Promise<void> {
+  const ref = userDoc(userId, "conceptProgress", conceptId);
+  await updateDoc(ref, {
+    status,
+    updatedAt: serverTimestamp(),
+  } as any).catch(async (err) => {
+    // If doc doesn't exist, create it
+    if (err.code === "not-found") {
+      await addDoc(userCollection(userId, "conceptProgress"), {
+        conceptId,
+        status,
+        updatedAt: serverTimestamp(),
+      });
+    } else {
+      throw err;
+    }
+  });
+}
+
+export async function getConceptProgress(
+  userId: string
+): Promise<ConceptProgress[]> {
+  try {
+    const q = query(
+      userCollection(userId, "conceptProgress"),
+      orderBy("updatedAt", "desc")
+    );
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map(
+      (d) => ({ id: d.id, ...d.data() } as ConceptProgress)
+    );
+  } catch (err: any) {
+    // Fallback without index
+    const snapshot = await getDocs(userCollection(userId, "conceptProgress"));
+    return snapshot.docs.map(
+      (d) => ({ id: d.id, ...d.data() } as ConceptProgress)
+    );
+  }
 }

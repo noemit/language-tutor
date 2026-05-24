@@ -2,12 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Languages, BookOpen, Archive } from "lucide-react";
+import { Languages, BookOpen, Lightbulb, Trophy } from "lucide-react";
 
 const navItems = [
   { href: "/", label: "Translate", icon: Languages },
   { href: "/flashcards", label: "Flashcards", icon: BookOpen },
-  { href: "/archive", label: "Archive", icon: Archive },
+  { href: "/concepts", label: "Concepts", icon: Lightbulb },
+  { href: "/mastered", label: "Mastered", icon: Trophy },
 ];
 
 export function BottomNav() {
