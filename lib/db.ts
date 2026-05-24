@@ -181,3 +181,72 @@ export async function getConceptProgress(
     );
   }
 }
+
+// Quiz attempts
+export async function saveQuizAttempt(
+  userId: string,
+  data: Omit<import("@/types").QuizAttempt, "id" | "timestamp" | "userId"
+>
+): Promise<DocumentReference> {
+  return addDoc(userCollection(userId, "quizAttempts"), {
+    ...data,
+    timestamp: serverTimestamp(),
+  });
+}
+
+export async function getQuizAttempts(
+  userId: string,
+  conceptId?: string
+): Promise<import("@/types").QuizAttempt[]> {
+  let q = query(
+    userCollection(userId, "quizAttempts"),
+    orderBy("timestamp", "desc")
+  );
+  if (conceptId) {
+    q = query(q, where("conceptId", "==", conceptId));
+  }
+  const snapshot = await getDocs(q);
+  return snapshot.docs.map(
+    (d) => ({ id: d.id, ...d.data() } as import("@/types").QuizAttempt)
+  );
+}
+
+// Suggestions
+export async function saveSuggestion(
+  userId: string,
+  conceptId: string,
+  reason: string
+): Promise<DocumentReference> {
+  return addDoc(userCollection(userId, "suggestions"), {
+    conceptId,
+    reason,
+    triggeredAt: serverTimestamp(),
+    dismissed: false,
+  });
+}
+
+export async function getSuggestions(userId: string): Promise<
+  { id: string; conceptId: string; reason: string; triggeredAt: Timestamp; dismissed: boolean }[]
+> {
+  const q = query(
+    userCollection(userId, "suggestions"),
+    where("dismissed", "==", false),
+    orderBy("triggeredAt", "desc")
+  );
+  try {
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as any));
+  } catch {
+    const snapshot = await getDocs(userCollection(userId, "suggestions"));
+    return snapshot.docs
+      .map((d) => ({ id: d.id, ...d.data() } as any))
+      .filter((s) => !s.dismissed)
+      .sort((a, b) => (b.triggeredAt?.toMillis?.() || 0) - (a.triggeredAt?.toMillis?.() || 0));
+  }
+}
+
+export async function dismissSuggestion(userId: string, suggestionId: string) {
+  return updateDoc(userDoc(userId, "suggestions", suggestionId), {
+    dismissed: true,
+  });
+}

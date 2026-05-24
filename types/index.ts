@@ -94,3 +94,34 @@ export interface ConceptProgress {
   status: ConceptStatus;
   updatedAt?: Timestamp;
 }
+
+// --- Quizzes ---
+
+export interface QuizQuestion {
+  question: string;
+  options: string[];
+  correctIndex: number;
+  explanation: string;
+}
+
+export interface QuizVersion {
+  version: number;
+  questions: QuizQuestion[];
+}
+
+export interface QuizAttempt {
+  id: string;
+  userId: string;
+  conceptId: string;
+  version: number;
+  score: number;
+  totalQuestions: number;
+  answers: { questionIndex: number; selectedIndex: number; correct: boolean }[];
+  timestamp: Timestamp;
+}
+
+export interface ConceptSuggestion {
+  conceptId: string;
+  reason: string;
+  triggeredAt: Timestamp;
+}
