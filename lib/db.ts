@@ -62,15 +62,34 @@ export async function getFlashcards(
   userId: string,
   status?: "active" | "archived"
 ): Promise<Flashcard[]> {
-  let q = query(
-    userCollection(userId, "flashcards"),
-    orderBy("createdAt", "desc")
-  );
-  if (status) {
-    q = query(q, where("status", "==", status));
+  try {
+    let q = query(
+      userCollection(userId, "flashcards"),
+      orderBy("createdAt", "desc")
+    );
+    if (status) {
+      q = query(q, where("status", "==", status));
+    }
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as Flashcard));
+  } catch (err: any) {
+    // Fallback: if composite index is missing, fetch all and filter client-side
+    console.warn("Flashcards query failed, using fallback:", err.message);
+    const q = query(userCollection(userId, "flashcards"));
+    const snapshot = await getDocs(q);
+    let cards = snapshot.docs.map(
+      (d) => ({ id: d.id, ...d.data() } as Flashcard)
+    );
+    if (status) {
+      cards = cards.filter((c) => c.status === status);
+    }
+    // Sort client-side by createdAt desc
+    return cards.sort((a, b) => {
+      const aTime = a.createdAt?.toMillis?.() || 0;
+      const bTime = b.createdAt?.toMillis?.() || 0;
+      return bTime - aTime;
+    });
   }
-  const snapshot = await getDocs(q);
-  return snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as Flashcard));
 }
 
 export async function updateFlashcard(

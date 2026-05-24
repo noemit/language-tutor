@@ -30,8 +30,9 @@ export default function FlashcardsPage() {
       setCurrentIndex(0);
       setSessionComplete(false);
       setSessionStats({ correct: 0, total: 0 });
-    } catch (e) {
-      toast.error("Failed to load flashcards");
+    } catch (e: any) {
+      console.error("Flashcards load error:", e);
+      toast.error("Failed to load flashcards: " + (e.message || "Unknown error"));
     } finally {
       setIsLoading(false);
     }
