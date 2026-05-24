@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Flashcard } from "@/types";
+import { getLanguageName } from "@/lib/languages";
 
 interface FlashcardCardProps {
   card: Flashcard;
@@ -28,7 +29,7 @@ export function FlashcardCard({ card }: FlashcardCardProps) {
           style={{ backfaceVisibility: "hidden" }}
         >
           <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-4">
-            {card.langPair[0]}
+            {getLanguageName(card.langPair[0])}
           </span>
           <h2 className="text-3xl sm:text-4xl font-bold text-foreground text-center leading-tight">
             {card.front}
@@ -45,7 +46,7 @@ export function FlashcardCard({ card }: FlashcardCardProps) {
           }}
         >
           <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-4">
-            {card.langPair[1]}
+            {getLanguageName(card.langPair[1])}
           </span>
           <h2 className="text-2xl sm:text-3xl font-bold text-foreground text-center leading-tight">
             {card.back}

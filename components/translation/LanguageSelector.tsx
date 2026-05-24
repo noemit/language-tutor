@@ -30,7 +30,19 @@ export function LanguageSelector({
       )}
       <Select value={value} onValueChange={(v) => onChange(v as LanguageCode)}>
         <SelectTrigger className="w-full bg-card border-border rounded-xl h-11 text-sm font-medium">
-          <SelectValue placeholder="Select language" />
+          <SelectValue placeholder="Select language">
+            {(() => {
+              const lang = LANGUAGES.find((l) => l.code === value);
+              return lang ? (
+                <span className="flex items-center">
+                  <span className="mr-2">{lang.flag}</span>
+                  {lang.name}
+                </span>
+              ) : (
+                value
+              );
+            })()}
+          </SelectValue>
         </SelectTrigger>
         <SelectContent className="rounded-xl">
           {LANGUAGES.map((lang) => (

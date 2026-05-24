@@ -11,6 +11,7 @@ import { toast } from "sonner";
 import {
   DEFAULT_SOURCE_LANG,
   DEFAULT_TARGET_LANG,
+  getLanguageName,
 } from "@/lib/languages";
 import {
   createTranslation,
@@ -170,7 +171,7 @@ export default function Home() {
       {/* Input */}
       <Card className="p-4 rounded-2xl border-border bg-card shadow-none">
         <Textarea
-          placeholder={`Paste ${sourceLang} text here...`}
+          placeholder={`Paste ${getLanguageName(sourceLang)} text here...`}
           value={text}
           onChange={(e) => setText(e.target.value)}
           className="min-h-[140px] resize-none border-0 bg-transparent text-lg placeholder:text-muted-foreground/60 focus-visible:ring-0 p-0"
