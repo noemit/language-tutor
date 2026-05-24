@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { BookOpen, ChevronDown, Lightbulb, Loader2, Trophy, X, RotateCcw, CheckCircle, XCircle } from "lucide-react";
+import { BookOpen, ChevronDown, Lightbulb, Loader2, Trophy, X, CheckCircle, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { useAuth } from "@/components/auth/AuthProvider";
@@ -35,6 +35,13 @@ export default function ConceptsPage() {
     questions: QuizQuestion[];
     currentIndex: number;
     answers: { selected: number; correct: boolean }[];
+  } | null>(null);
+  const [quizResults, setQuizResults] = useState<{
+    conceptId: string;
+    version: number;
+    questions: QuizQuestion[];
+    answers: { selected: number; correct: boolean }[];
+    score: number;
   } | null>(null);
   const [suggestions, setSuggestions] = useState<{ id: string; conceptId: string; reason: string }[]>([]);
 
@@ -103,6 +110,7 @@ export default function ConceptsPage() {
       currentIndex: 0,
       answers: [],
     });
+    setQuizResults(null);
   };
 
   const answerQuestion = (selectedIndex: number) => {
@@ -112,42 +120,45 @@ export default function ConceptsPage() {
     const newAnswers = [...activeQuiz.answers, { selected: selectedIndex, correct }];
 
     if (activeQuiz.currentIndex + 1 >= activeQuiz.questions.length) {
-      // Quiz complete
+      // Quiz complete — show review
       const score = newAnswers.filter((a) => a.correct).length;
-      const total = activeQuiz.questions.length;
-      finishQuiz(activeQuiz.conceptId, activeQuiz.version, score, total, newAnswers);
+      setQuizResults({
+        conceptId: activeQuiz.conceptId,
+        version: activeQuiz.version,
+        questions: activeQuiz.questions,
+        answers: newAnswers,
+        score,
+      });
     } else {
       setActiveQuiz({ ...activeQuiz, currentIndex: activeQuiz.currentIndex + 1, answers: newAnswers });
     }
   };
 
-  const finishQuiz = async (
-    conceptId: string,
-    version: number,
-    score: number,
-    total: number,
-    answers: { selected: number; correct: boolean }[]
-  ) => {
-    if (user) {
-      try {
-        await saveQuizAttempt(user.uid, {
-          conceptId,
-          version,
-          score,
-          totalQuestions: total,
-          answers: answers.map((a, i) => ({
-            questionIndex: i,
-            selectedIndex: a.selected,
-            correct: a.correct,
-          })),
-        });
-        toast.success(`Quiz complete! ${score}/${total}`);
-        loadData();
-      } catch (e) {
-        toast.error("Failed to save quiz result");
-      }
+  const saveAndCloseQuiz = async () => {
+    if (!quizResults || !user) {
+      setActiveQuiz(null);
+      setQuizResults(null);
+      return;
+    }
+    try {
+      await saveQuizAttempt(user.uid, {
+        conceptId: quizResults.conceptId,
+        version: quizResults.version,
+        score: quizResults.score,
+        totalQuestions: quizResults.questions.length,
+        answers: quizResults.answers.map((a, i) => ({
+          questionIndex: i,
+          selectedIndex: a.selected,
+          correct: a.correct,
+        })),
+      });
+      toast.success(`Quiz saved! ${quizResults.score}/${quizResults.questions.length}`);
+      loadData();
+    } catch (e) {
+      toast.error("Failed to save quiz result");
     }
     setActiveQuiz(null);
+    setQuizResults(null);
   };
 
   const handleDismissSuggestion = async (id: string) => {
@@ -177,7 +188,74 @@ export default function ConceptsPage() {
     );
   }
 
-  // Quiz overlay
+  // Quiz review screen
+  if (quizResults && activeQuiz) {
+    const pct = Math.round((quizResults.score / quizResults.questions.length) * 100);
+    const concept = CONCEPTS.find((c) => c.id === quizResults.conceptId);
+    return (
+      <div className="flex flex-col flex-1 px-4 pt-6 pb-4 gap-4 max-w-lg mx-auto w-full overflow-y-auto">
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-bold text-foreground">Quiz Review</h2>
+          <Button variant="ghost" size="sm" onClick={saveAndCloseQuiz} className="h-8 text-xs">
+            Save & Close
+          </Button>
+        </div>
+
+        {/* Score summary */}
+        <Card className={`p-5 rounded-2xl border-border shadow-none ${pct >= 80 ? "bg-mint/40" : pct >= 50 ? "bg-butter/40" : "bg-blush/40"}`}>
+          <div className="text-center">
+            <p className="text-sm text-muted-foreground uppercase tracking-wide font-medium">{concept?.title}</p>
+            <p className="text-4xl font-bold text-foreground mt-1">{quizResults.score}/{quizResults.questions.length}</p>
+            <p className="text-sm font-medium mt-1" style={{ color: pct >= 80 ? "#16a34a" : pct >= 50 ? "#ca8a04" : "#dc2626" }}>
+              {pct}%
+            </p>
+          </div>
+        </Card>
+
+        {/* Question review */}
+        <div className="flex flex-col gap-3">
+          {quizResults.questions.map((q, i) => {
+            const answer = quizResults.answers[i];
+            const isCorrect = answer.correct;
+            return (
+              <Card key={i} className={`p-4 rounded-2xl border-border shadow-none ${isCorrect ? "border-l-4 border-l-primary" : "border-l-4 border-l-destructive"}`}>
+                <div className="flex items-start gap-3">
+                  {isCorrect ? (
+                    <CheckCircle className="w-5 h-5 text-primary shrink-0 mt-0.5" />
+                  ) : (
+                    <XCircle className="w-5 h-5 text-destructive shrink-0 mt-0.5" />
+                  )}
+                  <div className="flex-1 flex flex-col gap-2">
+                    <p className="text-sm font-medium text-foreground">{q.question}</p>
+                    <div className="flex flex-col gap-1">
+                      <p className={`text-xs ${isCorrect ? "text-primary font-medium" : "text-destructive line-through"}`}>
+                        Your answer: {q.options[answer.selected]}
+                      </p>
+                      {!isCorrect && (
+                        <p className="text-xs text-primary font-medium">
+                          Correct: {q.options[q.correctIndex]}
+                        </p>
+                      )}
+                    </div>
+                    <p className="text-xs text-muted-foreground leading-relaxed bg-background/60 rounded-lg p-2 mt-1">
+                      {q.explanation}
+                    </p>
+                  </div>
+                </div>
+              </Card>
+            );
+          })}
+        </div>
+
+        <Button onClick={saveAndCloseQuiz} className="h-12 rounded-xl text-base font-semibold w-full">
+          <Trophy className="w-4 h-4 mr-2" />
+          Save & Close
+        </Button>
+      </div>
+    );
+  }
+
+  // Active quiz
   if (activeQuiz) {
     const q = activeQuiz.questions[activeQuiz.currentIndex];
     const progress = `${activeQuiz.currentIndex + 1} / ${activeQuiz.questions.length}`;
@@ -185,7 +263,7 @@ export default function ConceptsPage() {
       <div className="flex flex-col flex-1 px-4 pt-6 pb-4 gap-4 max-w-lg mx-auto w-full">
         <div className="flex items-center justify-between">
           <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Quiz {progress}</span>
-          <Button variant="ghost" size="sm" onClick={() => setActiveQuiz(null)} className="h-8 text-xs">
+          <Button variant="ghost" size="sm" onClick={() => { setActiveQuiz(null); setQuizResults(null); }} className="h-8 text-xs">
             Exit
           </Button>
         </div>
