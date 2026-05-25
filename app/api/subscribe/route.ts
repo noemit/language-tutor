@@ -11,6 +11,7 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
+    if (!db) return NextResponse.json({ error: "Firebase not configured" }, { status: 500 });
 
     await setDoc(
       doc(db, "pushSubscriptions", userId),
@@ -34,6 +35,7 @@ export async function DELETE(request: NextRequest) {
     if (!userId) {
       return NextResponse.json({ error: "Missing userId" }, { status: 400 });
     }
+    if (!db) return NextResponse.json({ error: "Firebase not configured" }, { status: 500 });
 
     await deleteDoc(doc(db, "pushSubscriptions", userId));
     return NextResponse.json({ success: true });

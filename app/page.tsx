@@ -18,6 +18,7 @@ import {
   createFlashcard,
   saveSuggestion,
 } from "@/lib/db";
+import { isFirebaseConfigured } from "@/lib/firebase";
 import { LanguageCode, TranslationResponse } from "@/types";
 
 const CONCEPT_KEYWORDS: Record<string, { keywords: string[]; reason: string }> = {
@@ -192,9 +193,11 @@ export default function Home() {
             flashcardIds.push(docRef.id);
           }
 
-          // Update translation with flashcard IDs
-          const { updateDoc } = await import("firebase/firestore");
-          await updateDoc(translationDoc, { flashcardIds });
+          // Update translation with flashcard IDs (Firebase only)
+          if (isFirebaseConfigured) {
+            const { updateDoc } = await import("firebase/firestore");
+            await updateDoc(translationDoc as any, { flashcardIds });
+          }
 
           // Generate concept suggestions based on translation content
           const suggestedConcepts = suggestConcepts(

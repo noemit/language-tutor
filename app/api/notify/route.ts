@@ -30,6 +30,7 @@ export async function POST(request: NextRequest) {
   try {
     // Get all subscriptions from Firestore
     // For a personal app, we just iterate pushSubscriptions collection
+    if (!db) return NextResponse.json({ error: "Firebase not configured" }, { status: 500 });
     const snapshot = await getDocs(collection(db, "pushSubscriptions"));
 
     if (snapshot.empty) {
@@ -60,7 +61,7 @@ export async function POST(request: NextRequest) {
         failed++;
         // If subscription is expired/invalid, remove it
         if (err.statusCode === 410 || err.statusCode === 404) {
-          await deleteDoc(doc(db, "pushSubscriptions", docSnap.id));
+          await deleteDoc(doc(db!, "pushSubscriptions", docSnap.id));
         }
       }
     }
