@@ -111,6 +111,9 @@ export async function localCreateFlashcard(
     id: generateId(),
     userId: db.userId,
     createdAt: now() as unknown as Flashcard["createdAt"],
+    masteryCount: 0,
+    consecutiveKnowStreak: 0,
+    masteryAchieved: false,
   };
   db.flashcards.unshift(doc);
   save(db);
