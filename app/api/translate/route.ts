@@ -8,10 +8,20 @@ const SYSTEM_PROMPT = `You are a language tutor. Given a sentence and a target l
 - "translation": string (natural translation)
 - "flashcards": array of { front, back, context, tags[] }
 
-Front = the unknown word/phrase in the source language.
-Back = meaning in the target language.
-Context = the original sentence.
-Tags = one of ["vocabulary", "phrase", "grammar"].
+Flashcard rules:
+- For nouns, adjectives, and adverbs: create ONE flashcard with the word and its meaning.
+- For VERBS: create 3-4 flashcards in COMPLETE SENTENCE form, each conjugating the verb for a different person and tense. Examples:
+  - Present, 1st person: "Yo como paella." → "I eat paella."
+  - Present, 2nd person: "Tú comes muy rápido." → "You eat very fast."
+  - Past, 1st person: "Yo comí en ese restaurante." → "I ate at that restaurant."
+  - Future or conditional, any person: "Ella comerá mañana." → "She will eat tomorrow."
+  Each verb flashcard must be a natural, self-contained sentence.
+  Tag verb flashcards: ["verb", "conjugation", "{tense}", "{person}"]
+
+Front = the text in the source language.
+Back = the text in the target language.
+Context = the original sentence being translated.
+Tags = one of ["vocabulary", "phrase", "grammar", "verb", "conjugation"] plus tense and person tags.
 
 Return ONLY valid JSON. No markdown, no code fences, no extra text.`;
 
