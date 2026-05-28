@@ -196,7 +196,7 @@ export default function Home() {
           // Update translation with flashcard IDs (Firebase only)
           if (isFirebaseConfigured) {
             const { updateDoc } = await import("firebase/firestore");
-            await updateDoc(translationDoc as any, { flashcardIds });
+            await updateDoc(translationDoc as import("firebase/firestore").DocumentReference, { flashcardIds });
           }
 
           // Generate concept suggestions based on translation content
@@ -215,13 +215,13 @@ export default function Home() {
             description: "Tap Flashcards to review them",
             icon: <Sparkles className="w-4 h-4" />,
           });
-        } catch (e: any) {
+        } catch (e: unknown) {
           console.error("Failed to save to Firestore:", e);
           toast.error("Saved locally only — cloud sync failed");
         }
       }
-    } catch (err: any) {
-      toast.error(err.message || "Something went wrong");
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Something went wrong");
     } finally {
       setIsTranslating(false);
     }

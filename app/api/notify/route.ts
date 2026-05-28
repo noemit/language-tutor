@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import webpush from "web-push";
 import { db } from "@/lib/firebase";
-import { doc, getDoc, deleteDoc, collection, getDocs } from "firebase/firestore";
+import { doc, deleteDoc, collection, getDocs } from "firebase/firestore";
 
 const vapidPublicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
 const vapidPrivateKey = process.env.VAPID_PRIVATE_KEY;
@@ -56,11 +56,12 @@ export async function POST(request: NextRequest) {
       try {
         await webpush.sendNotification(subscription, payload);
         sent++;
-      } catch (err: any) {
-        console.error("Push failed:", err.statusCode, err.body);
+      } catch (err: unknown) {
+        const pushErr = err as { statusCode?: number; body?: string };
+        console.error("Push failed:", pushErr.statusCode, pushErr.body);
         failed++;
         // If subscription is expired/invalid, remove it
-        if (err.statusCode === 410 || err.statusCode === 404) {
+        if (pushErr.statusCode === 410 || pushErr.statusCode === 404) {
           await deleteDoc(doc(db!, "pushSubscriptions", docSnap.id));
         }
       }

@@ -30,7 +30,7 @@ self.addEventListener("notificationclick", (event) => {
   }
 });
 
-self.addEventListener("install", (event) => {
+self.addEventListener("install", () => {
   self.skipWaiting();
 });
 

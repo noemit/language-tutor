@@ -14,7 +14,6 @@ export default function FlashcardsPage() {
   const { user, loading: authLoading } = useAuth();
   const [cards, setCards] = useState<Flashcard[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [isFlipped, setIsFlipped] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [sessionComplete, setSessionComplete] = useState(false);
   const [sessionStats, setSessionStats] = useState({ correct: 0, total: 0 });
@@ -30,17 +29,20 @@ export default function FlashcardsPage() {
       setCurrentIndex(0);
       setSessionComplete(false);
       setSessionStats({ correct: 0, total: 0 });
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error("Flashcards load error:", e);
-      toast.error("Failed to load flashcards: " + (e.message || "Unknown error"));
+      const msg = e instanceof Error ? e.message : "Unknown error";
+      toast.error("Failed to load flashcards: " + msg);
     } finally {
       setIsLoading(false);
     }
   }, [user]);
 
   useEffect(() => {
-    loadCards();
-  }, [loadCards]);
+    if (!user) return;
+    const timer = setTimeout(() => loadCards(), 0);
+    return () => clearTimeout(timer);
+  }, [user, loadCards]);
 
   const handleAnswer = async (correct: boolean) => {
     if (!user || cards.length === 0) return;
@@ -62,7 +64,7 @@ export default function FlashcardsPage() {
         totalAttempts: newTotal,
         correctStreak: newStreak,
         lastAttemptAt: serverTimestamp(),
-      } as any);
+      } as Record<string, unknown>);
 
       // Auto-archive if streak >= 7
       if (newStreak >= 7) {
@@ -82,9 +84,8 @@ export default function FlashcardsPage() {
         setSessionComplete(true);
       } else {
         setCurrentIndex((i) => i + 1);
-        setIsFlipped(false);
       }
-    } catch (e) {
+    } catch {
       toast.error("Failed to save progress");
     }
   };

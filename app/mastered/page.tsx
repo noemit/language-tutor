@@ -22,7 +22,7 @@ export default function MasteredPage() {
     try {
       const archived = await getFlashcards(user.uid, "archived");
       setCards(archived);
-    } catch (e) {
+    } catch {
       toast.error("Failed to load mastered cards");
     } finally {
       setIsLoading(false);
@@ -30,8 +30,10 @@ export default function MasteredPage() {
   }, [user]);
 
   useEffect(() => {
-    loadCards();
-  }, [loadCards]);
+    if (!user) return;
+    const timer = setTimeout(() => loadCards(), 0);
+    return () => clearTimeout(timer);
+  }, [user, loadCards]);
 
   const handleRestore = async (card: Flashcard) => {
     if (!user) return;
@@ -39,7 +41,7 @@ export default function MasteredPage() {
       await restoreFlashcard(user.uid, card.id);
       setCards((prev) => prev.filter((c) => c.id !== card.id));
       toast.success(`"${card.front}" restored to practice`);
-    } catch (e) {
+    } catch {
       toast.error("Failed to restore card");
     }
   };
