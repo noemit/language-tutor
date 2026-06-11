@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import webpush from "web-push";
 import { db } from "@/lib/firebase";
 import { doc, deleteDoc, collection, getDocs } from "firebase/firestore";
+import { CONCEPTS } from "@/lib/concepts-data";
 
 // Run fresh on every invocation (cron + manual test should never be cached)
 export const dynamic = "force-dynamic";
@@ -18,8 +19,7 @@ if (vapidPublicKey && vapidPrivateKey) {
   );
 }
 
-const MESSAGES = [
-  { title: "¡Hola!", body: "Time for some flashcards? 🧠" },
+const BASE_MESSAGES = [
   { title: "Study break?", body: "A quick concept review will keep you sharp." },
   { title: "Language Tutor", body: "Your Spanish won't practice itself. Let's go! 🇪🇸" },
   { title: "Reminder", body: "5 minutes of flashcards = big progress over time." },
@@ -49,15 +49,19 @@ async function sendNotifications(isTest: boolean): Promise<NotifyResult | { erro
       return { sent: 0, failed: 0, message: "No subscriptions found", test: isTest };
     }
 
-    const message = MESSAGES[Math.floor(Math.random() * MESSAGES.length)];
+    const base = BASE_MESSAGES[Math.floor(Math.random() * BASE_MESSAGES.length)];
+    const concept = CONCEPTS[Math.floor(Math.random() * CONCEPTS.length)];
+    const title = concept.title;
+    const body = `${base.body} Today's concept: ${concept.title}`;
+    const url = `/concepts?concept=${encodeURIComponent(concept.id)}`;
     let sent = 0;
     let failed = 0;
 
     const payload = JSON.stringify({
-      title: message.title,
-      body: message.body,
-      url: "/flashcards",
-      tag: "study-reminder",
+      title,
+      body,
+      url,
+      tag: `concept-${concept.id}`,
     });
 
     for (const docSnap of snapshot.docs) {

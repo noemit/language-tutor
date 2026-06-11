@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { useSearchParams } from "next/navigation";
 import { BookOpen, ChevronDown, Lightbulb, Loader2, Trophy, X, CheckCircle, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -25,6 +26,7 @@ const STATUS_COLORS: Record<ConceptStatus, string> = {
 
 export default function ConceptsPage() {
   const { user, loading: authLoading } = useAuth();
+  const searchParams = useSearchParams();
   const [progressMap, setProgressMap] = useState<Record<string, ConceptStatus>>({});
   const [quizHistory, setQuizHistory] = useState<Record<string, { score: number; total: number; timestamp: Date }[]>>({});
   const [isLoading, setIsLoading] = useState(true);
@@ -85,6 +87,14 @@ export default function ConceptsPage() {
     const timer = setTimeout(() => loadData(), 0);
     return () => clearTimeout(timer);
   }, [user, loadData]);
+
+  // Auto-expand concept from URL query param (e.g. ?concept=past-tense-sick)
+  useEffect(() => {
+    const conceptId = searchParams.get("concept");
+    if (conceptId && CONCEPTS.some((c) => c.id === conceptId)) {
+      setExpandedId(conceptId);
+    }
+  }, [searchParams]);
 
   const handleStatusChange = async (conceptId: string, status: ConceptStatus) => {
     if (!user) return;
