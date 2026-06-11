@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { ArrowUpDown, Languages, Loader2, Sparkles } from "lucide-react";
+import { useState, useRef, useEffect } from "react";
+import { ArrowUpDown, CheckCircle2, Languages, Loader2, Sparkles, XCircle } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -19,7 +19,11 @@ import {
   saveSuggestion,
 } from "@/lib/db";
 import { isFirebaseConfigured } from "@/lib/firebase";
-import { LanguageCode, TranslationResponse } from "@/types";
+import { LanguageCode, TranslationResponse, GeneratedFlashcard } from "@/types";
+
+// ---------------------------------------------------------------------------
+// Concept keyword detection (unchanged)
+// ---------------------------------------------------------------------------
 
 const CONCEPT_KEYWORDS: Record<string, { keywords: string[]; reason: string }> = {
   "past-tense-sick": {
@@ -112,26 +116,245 @@ function suggestConcepts(text: string, flashcards: { front: string; back: string
   const lowerText = text.toLowerCase();
   const allContent = lowerText + " " + flashcards.map((c) => `${c.front} ${c.back} ${c.tags.join(" ")}`.toLowerCase()).join(" ");
   const suggestions: string[] = [];
-
   for (const [conceptId, data] of Object.entries(CONCEPT_KEYWORDS)) {
     const matched = data.keywords.some((kw) => allContent.includes(kw.toLowerCase()));
-    if (matched && !suggestions.includes(conceptId)) {
-      suggestions.push(conceptId);
-    }
+    if (matched && !suggestions.includes(conceptId)) suggestions.push(conceptId);
   }
-
   return suggestions;
 }
 
+// ---------------------------------------------------------------------------
+// Active recall / cloze helpers
+// ---------------------------------------------------------------------------
+
+/** Returns the number of sentences in text (rough heuristic). */
+function countSentences(text: string): number {
+  const trimmed = text.trim();
+  if (!trimmed) return 0;
+  const endings = trimmed.match(/[.!?]+(?:\s|$)/g);
+  // If no ending punctuation, treat as 1 sentence
+  return endings ? endings.length : 1;
+}
+
+interface ClozeBlank {
+  answer: string;   // exact slice from the translation (preserves case)
+  hint: string;     // source-language word shown above the input
+}
+
+interface ClozeChallenge {
+  parts: string[];       // text segments between blanks (length = blanks.length + 1)
+  blanks: ClozeBlank[];
+  userAnswers: string[];
+  submitted: boolean;
+  fullTranslation: string;
+  flashcards: GeneratedFlashcard[];
+}
+
+/**
+ * Build a cloze challenge by finding flashcard `back` values inside the
+ * translation string and replacing them with blanks.
+ * Returns null if no blanks could be found.
+ */
+function buildCloze(data: TranslationResponse): ClozeChallenge | null {
+  const flashcards = data.flashcards ?? [];
+  if (flashcards.length === 0) return null;
+
+  const translation = data.translation;
+
+  // Find each flashcard's back value position, deduplicating overlaps
+  type Located = { pos: number; len: number; answer: string; hint: string };
+  const located: Located[] = [];
+
+  for (const card of flashcards) {
+    if (!card.back) continue;
+    const idx = translation.toLowerCase().indexOf(card.back.toLowerCase());
+    if (idx === -1) continue;
+    // Skip if this range overlaps an already-found blank
+    const overlaps = located.some(
+      (l) => idx < l.pos + l.len && idx + card.back.length > l.pos
+    );
+    if (!overlaps) {
+      located.push({
+        pos: idx,
+        len: card.back.length,
+        answer: translation.slice(idx, idx + card.back.length),
+        hint: card.front,
+      });
+    }
+  }
+
+  if (located.length === 0) return null;
+
+  // Sort by position
+  located.sort((a, b) => a.pos - b.pos);
+
+  // Build parts and blanks
+  const parts: string[] = [];
+  const blanks: ClozeBlank[] = [];
+  let cursor = 0;
+
+  for (const loc of located) {
+    parts.push(translation.slice(cursor, loc.pos));
+    blanks.push({ answer: loc.answer, hint: loc.hint });
+    cursor = loc.pos + loc.len;
+  }
+  parts.push(translation.slice(cursor));
+
+  return {
+    parts,
+    blanks,
+    userAnswers: blanks.map(() => ""),
+    submitted: false,
+    fullTranslation: translation,
+    flashcards,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Inline ClozeView component
+// ---------------------------------------------------------------------------
+
+interface ClozeViewProps {
+  challenge: ClozeChallenge;
+  onChange: (index: number, value: string) => void;
+  onSubmit: () => void;
+  onReveal: () => void;
+}
+
+function ClozeView({ challenge, onChange, onSubmit, onReveal }: ClozeViewProps) {
+  const { parts, blanks, userAnswers, submitted, fullTranslation, flashcards } = challenge;
+  const firstInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    firstInputRef.current?.focus();
+  }, []);
+
+  const score = submitted
+    ? blanks.filter((b, i) => userAnswers[i].trim().toLowerCase() === b.answer.toLowerCase()).length
+    : 0;
+  const allCorrect = submitted && score === blanks.length;
+
+  return (
+    <Card className="p-5 rounded-2xl border-border bg-white shadow-none flex flex-col gap-4">
+      {/* Header */}
+      <div>
+        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+          Fill in the blanks
+        </p>
+        <p className="text-xs text-muted-foreground mt-0.5">
+          Hints shown above each blank
+        </p>
+      </div>
+
+      {/* Cloze sentence */}
+      <div className="text-lg font-medium text-foreground leading-relaxed flex flex-wrap items-end gap-x-1 gap-y-3">
+        {parts.map((part, i) => (
+          <span key={i} className="flex flex-wrap items-end gap-x-1 gap-y-3">
+            {part && <span>{part}</span>}
+            {i < blanks.length && (
+              <span className="flex flex-col items-center gap-0.5">
+                {/* hint */}
+                <span className="text-[10px] font-semibold text-primary uppercase tracking-wider">
+                  {blanks[i].hint}
+                </span>
+                {submitted ? (
+                  /* revealed answer with correct/incorrect styling */
+                  <span
+                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-base font-semibold ${
+                      userAnswers[i].trim().toLowerCase() === blanks[i].answer.toLowerCase()
+                        ? "bg-mint text-foreground"
+                        : "bg-blush text-foreground"
+                    }`}
+                  >
+                    {userAnswers[i].trim().toLowerCase() === blanks[i].answer.toLowerCase() ? (
+                      <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                    ) : (
+                      <XCircle className="w-3.5 h-3.5 shrink-0" />
+                    )}
+                    {blanks[i].answer}
+                  </span>
+                ) : (
+                  <input
+                    ref={i === 0 ? firstInputRef : undefined}
+                    type="text"
+                    value={userAnswers[i]}
+                    onChange={(e) => onChange(i, e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && userAnswers.every((a) => a.trim())) {
+                        onSubmit();
+                      }
+                    }}
+                    placeholder="___"
+                    className={`border-b-2 border-primary bg-transparent text-base font-semibold text-center outline-none px-1 transition-colors focus:border-primary/80`}
+                    style={{ width: `${Math.max(blanks[i].answer.length + 2, 5)}ch` }}
+                  />
+                )}
+              </span>
+            )}
+          </span>
+        ))}
+      </div>
+
+      {/* Score or action */}
+      {submitted ? (
+        <div className="flex flex-col gap-3">
+          <div className={`flex items-center gap-2 text-sm font-semibold ${allCorrect ? "text-primary" : "text-muted-foreground"}`}>
+            {allCorrect ? (
+              <><CheckCircle2 className="w-4 h-4" /> Perfect — {score}/{blanks.length}</>
+            ) : (
+              <>{score}/{blanks.length} correct</>
+            )}
+          </div>
+
+          {/* Show wrong answers */}
+          {!allCorrect && (
+            <div className="flex flex-col gap-1.5">
+              {blanks.map((b, i) => {
+                const correct = userAnswers[i].trim().toLowerCase() === b.answer.toLowerCase();
+                if (correct) return null;
+                return (
+                  <p key={i} className="text-xs text-muted-foreground">
+                    <span className="font-semibold text-foreground">{b.hint}</span>
+                    {" → "}
+                    <span className="line-through text-destructive">{userAnswers[i] || "—"}</span>
+                    {" → "}
+                    <span className="font-semibold text-primary">{b.answer}</span>
+                  </p>
+                );
+              })}
+            </div>
+          )}
+
+          <Button onClick={onReveal} className="h-11 rounded-xl text-sm font-semibold w-full">
+            <Sparkles className="w-4 h-4 mr-2" />
+            See full translation
+          </Button>
+        </div>
+      ) : (
+        <Button
+          onClick={onSubmit}
+          disabled={!userAnswers.every((a) => a.trim())}
+          className="h-11 rounded-xl text-sm font-semibold w-full"
+        >
+          Check
+        </Button>
+      )}
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Main page
+// ---------------------------------------------------------------------------
+
 export default function Home() {
   const { user, loading: authLoading, signInWithGoogle } = useAuth();
-  const [sourceLang, setSourceLang] =
-    useState<LanguageCode>(DEFAULT_SOURCE_LANG);
-  const [targetLang, setTargetLang] =
-    useState<LanguageCode>(DEFAULT_TARGET_LANG);
+  const [sourceLang, setSourceLang] = useState<LanguageCode>(DEFAULT_SOURCE_LANG);
+  const [targetLang, setTargetLang] = useState<LanguageCode>(DEFAULT_TARGET_LANG);
   const [text, setText] = useState("");
   const [result, setResult] = useState<TranslationResponse | null>(null);
   const [isTranslating, setIsTranslating] = useState(false);
+  const [cloze, setCloze] = useState<ClozeChallenge | null>(null);
 
   const handleSwap = () => {
     setSourceLang(targetLang);
@@ -139,6 +362,7 @@ export default function Home() {
     if (result) {
       setText(result.translation);
       setResult(null);
+      setCloze(null);
     }
   };
 
@@ -146,16 +370,13 @@ export default function Home() {
     if (!text.trim()) return;
     setIsTranslating(true);
     setResult(null);
+    setCloze(null);
 
     try {
       const res = await fetch("/api/translate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          text: text.trim(),
-          sourceLang,
-          targetLang,
-        }),
+        body: JSON.stringify({ text: text.trim(), sourceLang, targetLang }),
       });
 
       if (!res.ok) {
@@ -164,9 +385,18 @@ export default function Home() {
       }
 
       const data: TranslationResponse = await res.json();
-      setResult(data);
 
-      // Save to Firestore
+      // Decide whether to show cloze challenge (1–2 sentences only)
+      const sentenceCount = countSentences(text.trim());
+      const challenge = sentenceCount <= 2 ? buildCloze(data) : null;
+
+      if (challenge) {
+        setCloze(challenge);
+      } else {
+        setResult(data);
+      }
+
+      // Save to Firestore (regardless of recall mode)
       if (user) {
         try {
           const translationDoc = await createTranslation(user.uid, {
@@ -193,28 +423,26 @@ export default function Home() {
             flashcardIds.push(docRef.id);
           }
 
-          // Update translation with flashcard IDs (Firebase only)
           if (isFirebaseConfigured) {
             const { updateDoc } = await import("firebase/firestore");
             await updateDoc(translationDoc as import("firebase/firestore").DocumentReference, { flashcardIds });
           }
 
-          // Generate concept suggestions based on translation content
           const suggestedConcepts = suggestConcepts(
             data.translation + " " + text.trim(),
             data.flashcards || []
           );
           for (const conceptId of suggestedConcepts) {
             const reason = CONCEPT_KEYWORDS[conceptId]?.reason || "Based on your recent translation";
-            await saveSuggestion(user.uid, conceptId, reason).catch(() => {
-              // Ignore duplicate or failed suggestions
-            });
+            await saveSuggestion(user.uid, conceptId, reason).catch(() => {});
           }
 
-          toast.success(`Created ${flashcardIds.length} flashcards`, {
-            description: "Tap Flashcards to review them",
-            icon: <Sparkles className="w-4 h-4" />,
-          });
+          if (!challenge) {
+            toast.success(`Created ${flashcardIds.length} flashcards`, {
+              description: "Tap Flashcards to review them",
+              icon: <Sparkles className="w-4 h-4" />,
+            });
+          }
         } catch (e: unknown) {
           console.error("Failed to save to Firestore:", e);
           toast.error("Saved locally only — cloud sync failed");
@@ -244,14 +472,10 @@ export default function Home() {
         <div className="text-center">
           <h1 className="text-2xl font-bold text-foreground">Language Tutor</h1>
           <p className="text-muted-foreground mt-2 max-w-xs">
-            Translate text and automatically generate flashcards to build your
-            vocabulary.
+            Translate text and automatically generate flashcards to build your vocabulary.
           </p>
         </div>
-        <Button
-          onClick={signInWithGoogle}
-          className="h-12 px-6 rounded-xl text-base font-medium"
-        >
+        <Button onClick={signInWithGoogle} className="h-12 px-6 rounded-xl text-base font-medium">
           Sign in with Google
         </Button>
       </div>
@@ -263,11 +487,7 @@ export default function Home() {
       {/* Language selectors */}
       <div className="flex items-end gap-2">
         <div className="flex-1">
-          <LanguageSelector
-            label="From"
-            value={sourceLang}
-            onChange={setSourceLang}
-          />
+          <LanguageSelector label="From" value={sourceLang} onChange={setSourceLang} />
         </div>
         <Button
           variant="ghost"
@@ -278,11 +498,7 @@ export default function Home() {
           <ArrowUpDown className="w-5 h-5" />
         </Button>
         <div className="flex-1">
-          <LanguageSelector
-            label="To"
-            value={targetLang}
-            onChange={setTargetLang}
-          />
+          <LanguageSelector label="To" value={targetLang} onChange={setTargetLang} />
         </div>
       </div>
 
@@ -291,7 +507,11 @@ export default function Home() {
         <Textarea
           placeholder={`Paste ${getLanguageName(sourceLang)} text here...`}
           value={text}
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => {
+            setText(e.target.value);
+            setResult(null);
+            setCloze(null);
+          }}
           className="min-h-[140px] resize-none border-0 bg-transparent text-lg placeholder:text-muted-foreground/60 focus-visible:ring-0 p-0"
         />
       </Card>
@@ -315,7 +535,33 @@ export default function Home() {
         )}
       </Button>
 
-      {/* Result */}
+      {/* Cloze recall challenge */}
+      {cloze && !result && (
+        <ClozeView
+          challenge={cloze}
+          onChange={(i, val) =>
+            setCloze((c) =>
+              c
+                ? {
+                    ...c,
+                    userAnswers: c.userAnswers.map((a, idx) => (idx === i ? val : a)),
+                  }
+                : c
+            )
+          }
+          onSubmit={() =>
+            setCloze((c) => (c ? { ...c, submitted: true } : c))
+          }
+          onReveal={() => {
+            if (cloze) {
+              setResult({ translation: cloze.fullTranslation, flashcards: cloze.flashcards });
+              setCloze(null);
+            }
+          }}
+        />
+      )}
+
+      {/* Full result */}
       {result && (
         <Card className="p-5 rounded-2xl border-border bg-white shadow-none">
           <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">

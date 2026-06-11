@@ -46,6 +46,13 @@ NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=your-project.appspot.com
 NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=123456789
 NEXT_PUBLIC_FIREBASE_APP_ID=1:123456789:web:abcdef
 NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID=G-XXXXXXXXXX
+
+# Required for push notifications (generate with: npx web-push generate-vapid-keys)
+NEXT_PUBLIC_VAPID_PUBLIC_KEY=your_vapid_public_key
+VAPID_PRIVATE_KEY=your_vapid_private_key
+
+# Optional — secures the Vercel cron job that sends daily reminders
+CRON_SECRET=any_random_string_at_least_16_chars
 ```
 
 **If you skip the Firebase variables**, the app runs entirely offline with localStorage. All your translations, flashcards, quiz results, and concept progress are saved in your browser. The header shows "Local" with a 💾 icon.
@@ -62,6 +69,7 @@ The app is configured for [Vercel](https://vercel.com/).
 2. Import repo in Vercel
 3. Add `DEEPSEEK_API_KEY` environment variable (required)
 4. Optionally add Firebase `NEXT_PUBLIC_*` variables for cloud features
+5. If you want push notifications, also add `NEXT_PUBLIC_VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, and `CRON_SECRET`
 
 ## PWA Install
 
