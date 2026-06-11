@@ -44,6 +44,12 @@ export interface Flashcard {
   totalAttempts: number;
   correctStreak: number;
   lastAttemptAt?: Timestamp;
+  /** Number of times user selected "Know" (full confidence) */
+  masteryCount: number;
+  /** Number of consecutive "Know" responses */
+  consecutiveKnowStreak: number;
+  /** Whether this card has reached mastery threshold (3 in a row OR 5 total) */
+  masteryAchieved: boolean;
 }
 
 export interface Attempt {
