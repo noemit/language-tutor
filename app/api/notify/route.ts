@@ -34,6 +34,10 @@ interface NotifyResult {
 }
 
 async function sendNotifications(isTest: boolean): Promise<NotifyResult | { error: string; status: number }> {
+  if (!vapidPublicKey || !vapidPrivateKey) {
+    return { error: "VAPID keys not configured on server", status: 500 };
+  }
+
   if (!db) {
     return { error: "Firebase not configured", status: 500 };
   }
@@ -78,7 +82,8 @@ async function sendNotifications(isTest: boolean): Promise<NotifyResult | { erro
     return { sent, failed, test: isTest };
   } catch (err) {
     console.error("Notify error:", err);
-    return { error: "Failed to send notifications", status: 500 };
+    const message = err instanceof Error ? err.message : String(err);
+    return { error: `Failed to send notifications: ${message}`, status: 500 };
   }
 }
 
