@@ -127,7 +127,7 @@ export default function FlashcardsPage() {
     try {
       // Mark as mastered immediately
       await updateFlashcard(user.uid, card.id, {
-        masteryCount: MASTERY_THRESHOLD,
+        masteryCount: MASTERY_THRESHOLD_TOTAL,
         masteryAchieved: true,
         lastAttemptAt: serverTimestamp(),
       } as any);

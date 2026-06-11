@@ -419,6 +419,9 @@ export default function Home() {
               status: "active",
               totalAttempts: 0,
               correctStreak: 0,
+              masteryCount: 0,
+              consecutiveKnowStreak: 0,
+              masteryAchieved: false,
             });
             flashcardIds.push(docRef.id);
           }
