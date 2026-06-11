@@ -34,14 +34,18 @@ export async function requestNotificationPermission(): Promise<NotificationPermi
   return permission;
 }
 
-export async function subscribeToPush(userId: string): Promise<boolean> {
+export async function subscribeToPush(userId: string): Promise<{ success: boolean; error?: string }> {
   if (!VAPID_PUBLIC_KEY) {
-    console.error("VAPID public key not configured");
-    return false;
+    const msg = "VAPID public key not configured";
+    console.error(msg);
+    return { success: false, error: msg };
   }
 
   const registration = await registerServiceWorker();
-  if (!registration) return false;
+  if (!registration) {
+    const msg = "Service worker registration failed";
+    return { success: false, error: msg };
+  }
 
   let subscription = await registration.pushManager.getSubscription();
 
@@ -52,8 +56,9 @@ export async function subscribeToPush(userId: string): Promise<boolean> {
         applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY) as unknown as BufferSource,
       });
     } catch (err) {
+      const msg = err instanceof Error ? err.message : "Push subscription failed";
       console.error("Push subscription failed:", err);
-      return false;
+      return { success: false, error: msg };
     }
   }
 
@@ -64,10 +69,15 @@ export async function subscribeToPush(userId: string): Promise<boolean> {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ userId, subscription: subscription.toJSON() }),
     });
-    return res.ok;
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      return { success: false, error: `Server error ${res.status}: ${text}` };
+    }
+    return { success: true };
   } catch (err) {
+    const msg = err instanceof Error ? err.message : "Failed to send subscription to server";
     console.error("Failed to send subscription to server:", err);
-    return false;
+    return { success: false, error: msg };
   }
 }
 

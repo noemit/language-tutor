@@ -44,15 +44,17 @@ export function AppHeader() {
       return;
     }
 
-    const success = await subscribeToPush(user.uid);
-    if (success) {
+    const result = await subscribeToPush(user.uid);
+    if (result.success) {
       setNotificationsEnabled(true);
       toast.success("Notifications enabled! 🔔", {
         description: "You'll get 3 reminders a day.",
       });
       await sendTestNotification();
     } else {
-      toast.error("Failed to enable notifications");
+      toast.error("Failed to enable notifications", {
+        description: result.error || "Unknown error",
+      });
     }
   };
 
