@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import webpush from "web-push";
 import { db } from "@/lib/firebase";
-import { doc, getDoc, deleteDoc, collection, getDocs } from "firebase/firestore";
+import { doc, deleteDoc, collection, getDocs } from "firebase/firestore";
+
+// Run fresh on every invocation (cron + manual test should never be cached)
+export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 const vapidPublicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
 const vapidPrivateKey = process.env.VAPID_PRIVATE_KEY;
@@ -22,53 +26,96 @@ const MESSAGES = [
   { title: "¡Venga!", body: "A little practice now, fluency later. 💪" },
 ];
 
-export async function POST(request: NextRequest) {
-  // If called with ?test=1, send test notification to the first subscription found
-  const { searchParams } = new URL(request.url);
-  const isTest = searchParams.get("test") === "1";
+interface NotifyResult {
+  sent: number;
+  failed: number;
+  test?: boolean;
+  message?: string;
+}
+
+async function sendNotifications(isTest: boolean): Promise<NotifyResult | { error: string; status: number }> {
+  if (!db) {
+    return { error: "Firebase not configured", status: 500 };
+  }
 
   try {
-    // Get all subscriptions from Firestore
-    // For a personal app, we just iterate pushSubscriptions collection
-    if (!db) return NextResponse.json({ error: "Firebase not configured" }, { status: 500 });
     const snapshot = await getDocs(collection(db, "pushSubscriptions"));
 
     if (snapshot.empty) {
-      return NextResponse.json({ sent: 0, message: "No subscriptions found" });
+      return { sent: 0, failed: 0, message: "No subscriptions found", test: isTest };
     }
 
     const message = MESSAGES[Math.floor(Math.random() * MESSAGES.length)];
     let sent = 0;
     let failed = 0;
 
+    const payload = JSON.stringify({
+      title: message.title,
+      body: message.body,
+      url: "/flashcards",
+      tag: "study-reminder",
+    });
+
     for (const docSnap of snapshot.docs) {
       const data = docSnap.data();
       const subscription = data.subscription;
       if (!subscription) continue;
 
-      const payload = JSON.stringify({
-        title: message.title,
-        body: message.body,
-        url: "/flashcards",
-        tag: "study-reminder",
-      });
-
       try {
         await webpush.sendNotification(subscription, payload);
         sent++;
-      } catch (err: any) {
-        console.error("Push failed:", err.statusCode, err.body);
+      } catch (err: unknown) {
+        const pushErr = err as { statusCode?: number; body?: string };
+        console.error("Push failed:", pushErr.statusCode, pushErr.body);
         failed++;
         // If subscription is expired/invalid, remove it
-        if (err.statusCode === 410 || err.statusCode === 404) {
+        if (pushErr.statusCode === 410 || pushErr.statusCode === 404) {
           await deleteDoc(doc(db!, "pushSubscriptions", docSnap.id));
         }
       }
     }
 
-    return NextResponse.json({ sent, failed, test: isTest });
+    return { sent, failed, test: isTest };
   } catch (err) {
     console.error("Notify error:", err);
-    return NextResponse.json({ error: "Failed to send notifications" }, { status: 500 });
+    return { error: "Failed to send notifications", status: 500 };
   }
+}
+
+function isCronAuthorized(request: NextRequest): boolean {
+  const cronSecret = process.env.CRON_SECRET;
+  // If no CRON_SECRET is configured, allow (helps during initial setup)
+  if (!cronSecret) return true;
+  const authHeader = request.headers.get("authorization");
+  return authHeader === `Bearer ${cronSecret}`;
+}
+
+// Vercel Cron Jobs invoke this endpoint with GET by default.
+export async function GET(request: NextRequest) {
+  if (!isCronAuthorized(request)) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const { searchParams } = new URL(request.url);
+  const isTest = searchParams.get("test") === "1";
+  const result = await sendNotifications(isTest);
+
+  if ("error" in result && "status" in result) {
+    return NextResponse.json({ error: result.error }, { status: result.status });
+  }
+
+  return NextResponse.json(result);
+}
+
+// Manual test trigger from the app (bell toggle)
+export async function POST(request: NextRequest) {
+  const { searchParams } = new URL(request.url);
+  const isTest = searchParams.get("test") === "1";
+  const result = await sendNotifications(isTest);
+
+  if ("error" in result && "status" in result) {
+    return NextResponse.json({ error: result.error }, { status: result.status });
+  }
+
+  return NextResponse.json(result);
 }

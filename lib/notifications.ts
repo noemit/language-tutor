@@ -49,7 +49,7 @@ export async function subscribeToPush(userId: string): Promise<boolean> {
     try {
       subscription = await registration.pushManager.subscribe({
         userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY) as any,
+        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY) as unknown as BufferSource,
       });
     } catch (err) {
       console.error("Push subscription failed:", err);

@@ -11,6 +11,7 @@ import {
   serverTimestamp,
   FieldValue,
   DocumentReference,
+  FirestoreError,
 } from "firebase/firestore";
 import {
   Flashcard,
@@ -108,8 +109,9 @@ export async function getFlashcards(
     }
     const snapshot = await getDocs(q);
     return snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as Flashcard));
-  } catch (err: any) {
-    console.warn("Flashcards query failed, using fallback:", err.message);
+  } catch (err: unknown) {
+    const fbErr = err as FirestoreError;
+    console.warn("Flashcards query failed, using fallback:", fbErr.message);
     const q = query(userCollection(userId, "flashcards"));
     const snapshot = await getDocs(q);
     let cards = snapshot.docs.map(
@@ -133,7 +135,7 @@ export async function updateFlashcard(
 ) {
   if (!isFirebaseConfigured) return localUpdateFlashcard(cardId, data);
 
-  return updateDoc(userDoc(userId, "flashcards", cardId), data as any);
+  return updateDoc(userDoc(userId, "flashcards", cardId), data as Record<string, unknown>);
 }
 
 export async function archiveFlashcard(userId: string, cardId: string) {
@@ -202,8 +204,9 @@ export async function setConceptProgress(
   await updateDoc(ref, {
     status,
     updatedAt: serverTimestamp(),
-  } as any).catch(async (err) => {
-    if (err.code === "not-found") {
+  } as Record<string, unknown>).catch(async (err: unknown) => {
+    const fbErr = err as FirestoreError;
+    if (fbErr.code === "not-found") {
       await addDoc(userCollection(userId, "conceptProgress"), {
         conceptId,
         status,
@@ -229,7 +232,7 @@ export async function getConceptProgress(
     return snapshot.docs.map(
       (d) => ({ id: d.id, ...d.data() } as ConceptProgress)
     );
-  } catch (err: any) {
+  } catch {
     const snapshot = await getDocs(userCollection(userId, "conceptProgress"));
     return snapshot.docs.map(
       (d) => ({ id: d.id, ...d.data() } as ConceptProgress)
@@ -257,7 +260,7 @@ export async function getQuizAttempts(
   userId: string,
   conceptId?: string
 ): Promise<import("@/types").QuizAttempt[]> {
-  if (!isFirebaseConfigured) return localGetQuizAttempts(conceptId) as any;
+  if (!isFirebaseConfigured) return localGetQuizAttempts(conceptId);
 
   let q = query(
     userCollection(userId, "quizAttempts"),
@@ -291,9 +294,17 @@ export async function saveSuggestion(
   });
 }
 
+interface SuggestionDoc {
+  id: string;
+  conceptId: string;
+  reason: string;
+  triggeredAt: unknown;
+  dismissed: boolean;
+}
+
 export async function getSuggestions(
   userId: string
-): Promise<{ id: string; conceptId: string; reason: string; triggeredAt: any; dismissed: boolean }[]> {
+): Promise<SuggestionDoc[]> {
   if (!isFirebaseConfigured) return localGetSuggestions();
 
   const q = query(
@@ -303,15 +314,16 @@ export async function getSuggestions(
   );
   try {
     const snapshot = await getDocs(q);
-    return snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as any));
+    return snapshot.docs.map((d) => ({ id: d.id, ...d.data() }) as SuggestionDoc);
   } catch {
     const snapshot = await getDocs(userCollection(userId, "suggestions"));
     return snapshot.docs
-      .map((d) => ({ id: d.id, ...d.data() } as any))
-      .filter((s: any) => !s.dismissed)
+      .map((d) => ({ id: d.id, ...d.data() }) as SuggestionDoc)
+      .filter((s) => !s.dismissed)
       .sort(
-        (a: any, b: any) =>
-          (b.triggeredAt?.toMillis?.() || 0) - (a.triggeredAt?.toMillis?.() || 0)
+        (a, b) =>
+          ((b.triggeredAt as { toMillis?: () => number })?.toMillis?.() || 0) -
+          ((a.triggeredAt as { toMillis?: () => number })?.toMillis?.() || 0)
       );
   }
 }

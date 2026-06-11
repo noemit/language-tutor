@@ -8,7 +8,7 @@ import { useAuth } from "@/components/auth/AuthProvider";
 import { getConceptProgress, setConceptProgress, saveQuizAttempt, getQuizAttempts, getSuggestions, dismissSuggestion } from "@/lib/db";
 import { CONCEPTS } from "@/lib/concepts-data";
 import { QUIZZES } from "@/lib/quiz-data";
-import { ConceptProgress, ConceptStatus, QuizQuestion } from "@/types";
+import { ConceptStatus, QuizQuestion } from "@/types";
 import { toast } from "sonner";
 
 const STATUS_LABELS: Record<ConceptStatus, string> = {
@@ -71,7 +71,7 @@ export default function ConceptsPage() {
       }
       setQuizHistory(hist);
       setSuggestions(suggs.map((s) => ({ id: s.id, conceptId: s.conceptId, reason: s.reason })));
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error("Failed to load concepts data:", e);
       toast.error("Failed to load progress");
     } finally {
@@ -79,9 +79,12 @@ export default function ConceptsPage() {
     }
   }, [user]);
 
+  // Load data when user changes — schedule via microtask to avoid cascading renders
   useEffect(() => {
-    loadData();
-  }, [loadData]);
+    if (!user) return;
+    const timer = setTimeout(() => loadData(), 0);
+    return () => clearTimeout(timer);
+  }, [user, loadData]);
 
   const handleStatusChange = async (conceptId: string, status: ConceptStatus) => {
     if (!user) return;
@@ -91,7 +94,7 @@ export default function ConceptsPage() {
       if (status === "mastered") {
         toast.success("Marked as mastered!", { icon: <Trophy className="w-4 h-4" /> });
       }
-    } catch (e) {
+    } catch {
       toast.error("Failed to update status");
     }
   };
@@ -102,7 +105,7 @@ export default function ConceptsPage() {
       toast.error("No quiz available for this concept yet");
       return;
     }
-    const randomVersion = versions[Math.floor(Math.random() * versions.length)];
+    const randomVersion = versions[versions.length - 1];
     setActiveQuiz({
       conceptId,
       version: randomVersion.version,
@@ -154,7 +157,7 @@ export default function ConceptsPage() {
       });
       toast.success(`Quiz saved! ${quizResults.score}/${quizResults.questions.length}`);
       loadData();
-    } catch (e) {
+    } catch {
       toast.error("Failed to save quiz result");
     }
     setActiveQuiz(null);
@@ -166,7 +169,7 @@ export default function ConceptsPage() {
     try {
       await dismissSuggestion(user.uid, id);
       setSuggestions((prev) => prev.filter((s) => s.id !== id));
-    } catch (e) {
+    } catch {
       toast.error("Failed to dismiss suggestion");
     }
   };

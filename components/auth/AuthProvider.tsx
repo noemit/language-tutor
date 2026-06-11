@@ -33,7 +33,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | LocalUser | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // Initialize auth state — runs once on mount
   useEffect(() => {
+    let cancelled = false;
     if (!isFirebaseConfigured) {
       // Local-only mode — no sign-in required, everything saved to localStorage
       const localUser: LocalUser = {
@@ -43,17 +45,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         photoURL: null,
         isAnonymous: false,
       };
-      setUser(localUser);
-      setLoading(false);
-      return;
+      Promise.resolve().then(() => {
+        if (!cancelled) {
+          setUser(localUser);
+          setLoading(false);
+        }
+      });
+      return () => { cancelled = true; };
     }
 
     // Firebase mode
     const unsubscribe = onAuthStateChanged(auth!, (u) => {
-      setUser(u);
-      setLoading(false);
+      if (!cancelled) {
+        setUser(u);
+        setLoading(false);
+      }
     });
-    return () => unsubscribe();
+    return () => { cancelled = true; unsubscribe(); };
   }, []);
 
   const signInWithGoogle = async () => {

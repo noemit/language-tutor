@@ -9,12 +9,12 @@ declare module "web-push" {
     privateKey: string;
   };
   export function sendNotification(
-    pushSubscription: any,
+    pushSubscription: Record<string, unknown>,
     payload?: string,
-    options?: any
+    options?: Record<string, unknown>
   ): Promise<{
     statusCode: number;
-    headers: any;
+    headers: Record<string, unknown>;
     body: string;
   }>;
 }

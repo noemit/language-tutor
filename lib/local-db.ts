@@ -151,6 +151,7 @@ export async function localArchiveFlashcard(cardId: string) {
   const idx = db.flashcards.findIndex((c) => c.id === cardId);
   if (idx !== -1) {
     db.flashcards[idx].status = "archived";
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (db.flashcards[idx] as any).archivedAt = now();
     save(db);
   }
@@ -161,6 +162,7 @@ export async function localRestoreFlashcard(cardId: string) {
   const idx = db.flashcards.findIndex((c) => c.id === cardId);
   if (idx !== -1) {
     db.flashcards[idx].status = "active";
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (db.flashcards[idx] as any).archivedAt = null;
     save(db);
   }
@@ -209,6 +211,7 @@ export async function localSetConceptProgress(
   const idx = db.conceptProgress.findIndex((c) => c.conceptId === conceptId);
   if (idx !== -1) {
     db.conceptProgress[idx].status = status;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (db.conceptProgress[idx] as any).updatedAt = now();
   } else {
     db.conceptProgress.push({
