@@ -32,9 +32,15 @@ export function AppHeader() {
     }
 
     if (notificationsEnabled) {
-      await unsubscribeFromPush(user.uid);
-      setNotificationsEnabled(false);
-      toast.success("Notifications disabled");
+      const result = await unsubscribeFromPush(user.uid);
+      if (result.success) {
+        setNotificationsEnabled(false);
+        toast.success("Notifications disabled");
+      } else {
+        toast.error("Failed to disable notifications", {
+          description: result.error || "Unknown error",
+        });
+      }
       return;
     }
 

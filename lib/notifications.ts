@@ -1,5 +1,8 @@
 "use client";
 
+import { db } from "@/lib/firebase";
+import { doc, setDoc, deleteDoc } from "firebase/firestore";
+
 const VAPID_PUBLIC_KEY = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
 
 function urlBase64ToUint8Array(base64String: string): Uint8Array {
@@ -43,8 +46,7 @@ export async function subscribeToPush(userId: string): Promise<{ success: boolea
 
   const registration = await registerServiceWorker();
   if (!registration) {
-    const msg = "Service worker registration failed";
-    return { success: false, error: msg };
+    return { success: false, error: "Service worker registration failed" };
   }
 
   let subscription = await registration.pushManager.getSubscription();
@@ -62,44 +64,50 @@ export async function subscribeToPush(userId: string): Promise<{ success: boolea
     }
   }
 
-  // Send subscription to server
+  // Save subscription directly to Firestore from the client (auth is already handled by Firebase)
+  if (!db) {
+    return { success: false, error: "Firebase not initialized" };
+  }
+
   try {
-    const res = await fetch("/api/subscribe", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ userId, subscription: subscription.toJSON() }),
-    });
-    if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      return { success: false, error: `Server error ${res.status}: ${text}` };
-    }
+    await setDoc(
+      doc(db, "pushSubscriptions", userId),
+      {
+        subscription: subscription.toJSON(),
+        updatedAt: new Date(),
+      },
+      { merge: true }
+    );
     return { success: true };
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "Failed to send subscription to server";
-    console.error("Failed to send subscription to server:", err);
+    const msg = err instanceof Error ? err.message : "Failed to save subscription";
+    console.error("Firestore save error:", err);
     return { success: false, error: msg };
   }
 }
 
-export async function unsubscribeFromPush(userId: string): Promise<boolean> {
+export async function unsubscribeFromPush(userId: string): Promise<{ success: boolean; error?: string }> {
   const registration = await registerServiceWorker();
-  if (!registration) return false;
+  if (!registration) {
+    return { success: false, error: "Service worker not registered" };
+  }
 
   const subscription = await registration.pushManager.getSubscription();
   if (subscription) {
     await subscription.unsubscribe();
   }
 
+  if (!db) {
+    return { success: false, error: "Firebase not initialized" };
+  }
+
   try {
-    const res = await fetch("/api/subscribe", {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ userId }),
-    });
-    return res.ok;
+    await deleteDoc(doc(db, "pushSubscriptions", userId));
+    return { success: true };
   } catch (err) {
-    console.error("Failed to remove subscription:", err);
-    return false;
+    const msg = err instanceof Error ? err.message : "Failed to remove subscription";
+    console.error("Firestore delete error:", err);
+    return { success: false, error: msg };
   }
 }
 
