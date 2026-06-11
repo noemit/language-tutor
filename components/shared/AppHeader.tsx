@@ -56,7 +56,16 @@ export function AppHeader() {
       toast.success("Notifications enabled! 🔔", {
         description: "You'll get 3 reminders a day.",
       });
-      await sendTestNotification();
+      const test = await sendTestNotification();
+      if (test.ok) {
+        toast.info(`Test notification sent (${test.sent ?? 0} delivered)`, {
+          description: test.failed ? `${test.failed} failed — check phone permissions` : "Check your phone in a few seconds",
+        });
+      } else {
+        toast.error("Test notification failed", {
+          description: test.error || "Unknown error",
+        });
+      }
     } else {
       toast.error("Failed to enable notifications", {
         description: result.error || "Unknown error",

@@ -22,6 +22,8 @@ export async function registerServiceWorker(): Promise<ServiceWorkerRegistration
   }
   try {
     const registration = await navigator.serviceWorker.register("/sw.js");
+    // Wait for the service worker to be active (important on iOS)
+    await navigator.serviceWorker.ready;
     return registration;
   } catch (err) {
     console.error("Service worker registration failed:", err);
@@ -111,12 +113,23 @@ export async function unsubscribeFromPush(userId: string): Promise<{ success: bo
   }
 }
 
-export async function sendTestNotification(): Promise<boolean> {
+export async function sendTestNotification(): Promise<{
+  ok: boolean;
+  sent?: number;
+  failed?: number;
+  error?: string;
+}> {
   try {
     const res = await fetch("/api/notify", { method: "POST" });
-    return res.ok;
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      return { ok: false, error: `Server error ${res.status}: ${text}` };
+    }
+    const data = await res.json().catch(() => ({}));
+    return { ok: true, sent: data.sent, failed: data.failed };
   } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
     console.error("Test notification failed:", err);
-    return false;
+    return { ok: false, error: msg };
   }
 }
