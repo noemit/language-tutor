@@ -25,7 +25,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: true });
   } catch (err) {
     console.error("Subscribe error:", err);
-    return NextResponse.json({ error: "Failed to save subscription" }, { status: 500 });
+    const message = err instanceof Error ? err.message : String(err);
+    return NextResponse.json({ error: "Failed to save subscription", details: message }, { status: 500 });
   }
 }
 
