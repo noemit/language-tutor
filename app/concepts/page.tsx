@@ -1,15 +1,15 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { BookOpen, ChevronDown, Lightbulb, Loader2, Trophy, X, CheckCircle, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { useAuth } from "@/components/auth/AuthProvider";
-import { getConceptProgress, setConceptProgress, saveQuizAttempt, getQuizAttempts, getSuggestions, dismissSuggestion } from "@/lib/db";
+import { getConceptProgress, setConceptProgress, saveQuizAttempt, getQuizAttempts, getSuggestions, dismissSuggestion, getGeneratedQuizzes, saveGeneratedQuiz } from "@/lib/db";
 import { CONCEPTS } from "@/lib/concepts-data";
 import { QUIZZES } from "@/lib/quiz-data";
-import { ConceptStatus, QuizQuestion } from "@/types";
+import { Concept, ConceptProgress, ConceptStatus, GeneratedQuiz, QuizQuestion } from "@/types";
 import { toast } from "sonner";
 
 const STATUS_LABELS: Record<ConceptStatus, string> = {
@@ -24,16 +24,70 @@ const STATUS_COLORS: Record<ConceptStatus, string> = {
   mastered: "bg-mint text-foreground",
 };
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+/** Days to wait after each consecutive 100% quiz (stage 1..4). Completing stage 4 = mastered. */
+const REVIEW_INTERVALS_DAYS = [1, 3, 7, 30];
+/** How many recent quiz versions to avoid repeating */
+const AVOID_RECENT_VERSIONS = 2;
+/** Background-generate a new variant whenever fewer than this many are cached */
+const MIN_CACHED_VARIANTS = 3;
+
+function shuffleArray<T>(arr: T[]): T[] {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+/** Shuffle question order and each question's options, remapping correctIndex. */
+function shuffleQuiz(questions: QuizQuestion[]): QuizQuestion[] {
+  return shuffleArray(questions).map((q) => {
+    const order = shuffleArray(q.options.map((_, i) => i));
+    return {
+      ...q,
+      options: order.map((i) => q.options[i]),
+      correctIndex: order.indexOf(q.correctIndex),
+    };
+  });
+}
+
+interface QuizPoolEntry {
+  /** `v{version}` for static versions, `g-{id}` for generated variants */
+  key: string;
+  version: number;
+  generatedId?: string;
+  questions: QuizQuestion[];
+}
+
 export default function ConceptsPage() {
+  // useSearchParams needs a Suspense boundary during prerendering
+  return (
+    <Suspense
+      fallback={
+        <div className="flex flex-col flex-1 items-center justify-center px-6">
+          <Loader2 className="w-8 h-8 animate-spin text-primary" />
+        </div>
+      }
+    >
+      <ConceptsPageContent />
+    </Suspense>
+  );
+}
+
+function ConceptsPageContent() {
   const { user, loading: authLoading } = useAuth();
   const searchParams = useSearchParams();
-  const [progressMap, setProgressMap] = useState<Record<string, ConceptStatus>>({});
-  const [quizHistory, setQuizHistory] = useState<Record<string, { score: number; total: number; timestamp: Date }[]>>({});
+  const [progressMap, setProgressMap] = useState<Record<string, ConceptProgress>>({});
+  const [quizHistory, setQuizHistory] = useState<Record<string, { score: number; total: number; timestamp: Date; quizKey: string }[]>>({});
   const [isLoading, setIsLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [activeQuiz, setActiveQuiz] = useState<{
     conceptId: string;
+    quizKey: string;
     version: number;
+    generatedId?: string;
     questions: QuizQuestion[];
     currentIndex: number;
     answers: { selected: number; correct: boolean }[];
@@ -41,38 +95,58 @@ export default function ConceptsPage() {
   const [quizResults, setQuizResults] = useState<{
     conceptId: string;
     version: number;
+    generatedId?: string;
     questions: QuizQuestion[];
     answers: { selected: number; correct: boolean }[];
     score: number;
   } | null>(null);
   const [suggestions, setSuggestions] = useState<{ id: string; conceptId: string; reason: string }[]>([]);
+  const [dueTodayIds, setDueTodayIds] = useState<string[]>([]);
 
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async (background = false) => {
     if (!user) return;
-    setIsLoading(true);
+    if (!background) setIsLoading(true);
     try {
       const [progress, attempts, suggs] = await Promise.all([
         getConceptProgress(user.uid),
         getQuizAttempts(user.uid),
         getSuggestions(user.uid),
       ]);
-      const map: Record<string, ConceptStatus> = {};
+      const map: Record<string, ConceptProgress> = {};
       for (const p of progress) {
-        map[p.conceptId] = p.status;
+        // Results are newest-first; a concept may have legacy duplicate docs —
+        // keep only the freshest one.
+        if (!map[p.conceptId]) map[p.conceptId] = p;
       }
       setProgressMap(map);
 
-      const hist: Record<string, { score: number; total: number; timestamp: Date }[]> = {};
+      const hist: Record<string, { score: number; total: number; timestamp: Date; quizKey: string }[]> = {};
       for (const a of attempts) {
         if (!hist[a.conceptId]) hist[a.conceptId] = [];
         hist[a.conceptId].push({
           score: a.score,
           total: a.totalQuestions,
           timestamp: a.timestamp?.toDate?.() || new Date(),
+          quizKey: a.generatedId ? `g-${a.generatedId}` : `v${a.version}`,
         });
       }
       setQuizHistory(hist);
       setSuggestions(suggs.map((s) => ({ id: s.id, conceptId: s.conceptId, reason: s.reason })));
+
+      // Due-today queue (computed here, not during render — Date.now() is impure):
+      // scheduled reviews that have arrived, most overdue first, then a few new topics.
+      const nowMs = Date.now();
+      const dueReview = CONCEPTS.filter((c) => {
+        const p = map[c.id];
+        return p?.status !== "mastered" && p?.nextReviewAt != null && p.nextReviewAt <= nowMs;
+      }).sort((a, b) => (map[a.id]?.nextReviewAt ?? 0) - (map[b.id]?.nextReviewAt ?? 0));
+      const neverQuizzed = CONCEPTS.filter(
+        (c) =>
+          !dueReview.includes(c) &&
+          map[c.id]?.status !== "mastered" &&
+          (hist[c.id] || []).length === 0
+      );
+      setDueTodayIds([...dueReview, ...neverQuizzed.slice(0, 3)].map((c) => c.id));
     } catch (e: unknown) {
       console.error("Failed to load concepts data:", e);
       toast.error("Failed to load progress");
@@ -99,8 +173,14 @@ export default function ConceptsPage() {
   const handleStatusChange = async (conceptId: string, status: ConceptStatus) => {
     if (!user) return;
     try {
-      await setConceptProgress(user.uid, conceptId, status);
-      setProgressMap((prev) => ({ ...prev, [conceptId]: status }));
+      // Manually marking mastered also clears the review schedule
+      const extra = status === "mastered" ? { nextReviewAt: null } : undefined;
+      await setConceptProgress(user.uid, conceptId, status, extra);
+      setProgressMap((prev) => ({
+        ...prev,
+        [conceptId]: { ...prev[conceptId], conceptId, status, ...(extra ?? {}) } as ConceptProgress,
+      }));
+      void loadData(true); // refresh the due-today queue
       if (status === "mastered") {
         toast.success("Marked as mastered!", { icon: <Trophy className="w-4 h-4" /> });
       }
@@ -109,22 +189,47 @@ export default function ConceptsPage() {
     }
   };
 
-  const startQuiz = (conceptId: string) => {
-    const versions = QUIZZES[conceptId];
-    if (!versions || versions.length === 0) {
+  const startQuiz = useCallback(async (conceptId: string) => {
+    if (!user) return;
+
+    // Pool = static versions + cached AI-generated variants
+    const pool: QuizPoolEntry[] = (QUIZZES[conceptId] || []).map((v) => ({
+      key: `v${v.version}`,
+      version: v.version,
+      questions: v.questions,
+    }));
+    let generated: GeneratedQuiz[] = [];
+    try {
+      generated = await getGeneratedQuizzes(user.uid, conceptId);
+    } catch { /* variants are a bonus — continue without them */ }
+    for (const g of generated) {
+      pool.push({ key: `g-${g.id}`, version: 0, generatedId: g.id, questions: g.questions });
+    }
+
+    if (pool.length === 0) {
       toast.error("No quiz available for this concept yet");
       return;
     }
-    const randomVersion = versions[versions.length - 1];
+
+    // Prefer versions not used in the most recent attempts
+    const recentKeys = (quizHistory[conceptId] || [])
+      .slice(0, AVOID_RECENT_VERSIONS)
+      .map((h) => h.quizKey);
+    const fresh = pool.filter((p) => !recentKeys.includes(p.key));
+    const candidates = fresh.length > 0 ? fresh : pool;
+    const pick = candidates[Math.floor(Math.random() * candidates.length)];
+
     setActiveQuiz({
       conceptId,
-      version: randomVersion.version,
-      questions: randomVersion.questions,
+      quizKey: pick.key,
+      version: pick.version,
+      generatedId: pick.generatedId,
+      questions: shuffleQuiz(pick.questions),
       currentIndex: 0,
       answers: [],
     });
     setQuizResults(null);
-  };
+  }, [user, quizHistory]);
 
   const answerQuestion = (selectedIndex: number) => {
     if (!activeQuiz) return;
@@ -138,6 +243,7 @@ export default function ConceptsPage() {
       setQuizResults({
         conceptId: activeQuiz.conceptId,
         version: activeQuiz.version,
+        generatedId: activeQuiz.generatedId,
         questions: activeQuiz.questions,
         answers: newAnswers,
         score,
@@ -147,26 +253,89 @@ export default function ConceptsPage() {
     }
   };
 
+  /** Fire-and-forget: top up the cached AI variants for this concept so the next attempt differs. */
+  const maybeGenerateVariant = async (conceptId: string) => {
+    if (!user) return;
+    try {
+      const existing = await getGeneratedQuizzes(user.uid, conceptId);
+      if (existing.length >= MIN_CACHED_VARIANTS) return;
+      const res = await fetch("/api/quiz-variant", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ conceptId }),
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      await saveGeneratedQuiz(user.uid, conceptId, data.questions);
+      toast.success("Fresh quiz questions ready for next time", { duration: 3000 });
+    } catch { /* silent — next attempt just reuses the existing pool */ }
+  };
+
   const saveAndCloseQuiz = async () => {
     if (!quizResults || !user) {
       setActiveQuiz(null);
       setQuizResults(null);
       return;
     }
+    const total = quizResults.questions.length;
+    const pct = Math.round((quizResults.score / total) * 100);
     try {
       await saveQuizAttempt(user.uid, {
         conceptId: quizResults.conceptId,
         version: quizResults.version,
+        // Firestore rejects undefined values — only include when present
+        ...(quizResults.generatedId ? { generatedId: quizResults.generatedId } : {}),
         score: quizResults.score,
-        totalQuestions: quizResults.questions.length,
+        totalQuestions: total,
         answers: quizResults.answers.map((a, i) => ({
           questionIndex: i,
           selectedIndex: a.selected,
           correct: a.correct,
         })),
       });
-      toast.success(`Quiz saved! ${quizResults.score}/${quizResults.questions.length}`);
-      loadData();
+
+      // Repeat-until-100% scheduling: daily until a perfect score, then a
+      // spacing ladder (+1d, +3d, +7d, +30d) that ends in mastery.
+      const existing = progressMap[quizResults.conceptId];
+      const prevStage = existing?.reviewStage ?? 0;
+      const prevBest = existing?.bestScore ?? 0;
+      let stage: number;
+      let nextReviewAt: number | null;
+      let status: ConceptStatus;
+
+      if (pct === 100) {
+        stage = prevStage + 1;
+        if (stage > REVIEW_INTERVALS_DAYS.length) {
+          // Cleared the final (+30d) rung — fully mastered
+          stage = REVIEW_INTERVALS_DAYS.length;
+          nextReviewAt = null;
+          status = "mastered";
+          toast.success(`🏆 "${CONCEPTS.find((c) => c.id === quizResults.conceptId)?.title}" mastered!`);
+        } else {
+          nextReviewAt = Date.now() + REVIEW_INTERVALS_DAYS[stage - 1] * DAY_MS;
+          status = existing?.status === "mastered" ? "mastered" : "confident";
+          toast.success(
+            `100%! Next review in ${REVIEW_INTERVALS_DAYS[stage - 1]} day${REVIEW_INTERVALS_DAYS[stage - 1] > 1 ? "s" : ""}.`
+          );
+        }
+      } else {
+        stage = 0;
+        nextReviewAt = Date.now() + DAY_MS;
+        status = existing?.status === "mastered" ? "confident" : existing?.status ?? "still-learning";
+        toast(`Score ${pct}% — this one comes back tomorrow.`);
+      }
+
+      const extra = {
+        lastScore: pct,
+        bestScore: Math.max(prevBest, pct),
+        nextReviewAt,
+        reviewStage: stage,
+      };
+      await setConceptProgress(user.uid, quizResults.conceptId, status, extra);
+      await loadData(true); // refresh history, progress, and the due-today queue
+
+      toast.success(`Quiz saved! ${quizResults.score}/${total}`);
+      void maybeGenerateVariant(quizResults.conceptId);
     } catch {
       toast.error("Failed to save quiz result");
     }
@@ -304,6 +473,12 @@ export default function ConceptsPage() {
     );
   }
 
+  // Due-today queue was computed in loadData (render must stay pure)
+  const dueToday = dueTodayIds
+    .map((id) => CONCEPTS.find((c) => c.id === id))
+    .filter((c): c is Concept => Boolean(c));
+  const dueReviewCount = dueToday.filter((c) => (quizHistory[c.id] || []).length > 0).length;
+
   return (
     <div className="flex flex-col flex-1 px-4 pt-6 pb-4 gap-4 max-w-lg mx-auto w-full">
       <div className="flex items-center justify-between">
@@ -313,9 +488,50 @@ export default function ConceptsPage() {
         </span>
       </div>
 
+      {/* Due today */}
+      {dueToday.length > 0 && (
+        <Card className="p-4 rounded-2xl border-border bg-mint/20 shadow-none">
+          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-3">
+            Due today · {dueReviewCount > 0 ? `${dueReviewCount} review${dueReviewCount > 1 ? "s" : ""}` : "new topics"}
+          </p>
+          <div className="flex flex-col gap-2">
+            {dueToday.map((concept) => {
+              const p = progressMap[concept.id];
+              const isNew = (quizHistory[concept.id] || []).length === 0;
+              return (
+                <div key={concept.id} className="flex items-center gap-2 bg-card rounded-xl p-3">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-foreground truncate">{concept.title}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {isNew ? "New topic" : p?.lastScore != null ? `Last score: ${p.lastScore}%` : "Review due"}
+                    </p>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setExpandedId(concept.id)}
+                    className="h-8 text-xs shrink-0"
+                  >
+                    Guide
+                  </Button>
+                  <Button
+                    size="sm"
+                    onClick={() => startQuiz(concept.id)}
+                    className="h-8 text-xs font-semibold rounded-lg shrink-0"
+                  >
+                    <Trophy className="w-3.5 h-3.5 mr-1" />
+                    Take quiz
+                  </Button>
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+      )}
+
       <div className="flex flex-col gap-3">
         {CONCEPTS.map((concept) => {
-          const status = progressMap[concept.id] || "still-learning";
+          const status = progressMap[concept.id]?.status || "still-learning";
           const isExpanded = expandedId === concept.id;
           const history = quizHistory[concept.id] || [];
           const bestScore = history.length > 0

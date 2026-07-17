@@ -1,6 +1,6 @@
 # Language Tutor
 
-A personal progressive web app for translating text and automatically generating flashcards to build vocabulary over time.
+A personal progressive web app for learning Spanish through daily concept lessons with AI-generated quizzes, spaced-repetition flashcards, and hourly sentence notifications.
 
 ![Language Tutor](https://img.shields.io/badge/built%20with-Next.js-black?logo=next.js)
 ![Firebase](https://img.shields.io/badge/optional-Firebase-orange?logo=firebase)
@@ -8,17 +8,18 @@ A personal progressive web app for translating text and automatically generating
 
 ## What it does
 
-1. **Translate** — Paste text in Spanish, Romanian, Galician, or English and get a natural translation powered by DeepSeek.
-2. **Auto-generate flashcards** — The LLM intelligently extracts words, phrases, and grammar concepts worth learning and creates flashcards automatically.
-3. **Practice** — Flip through flashcards, self-assess with "Again" or "Good", and track your progress.
-4. **Archive** — Cards you master (7 correct in a row) automatically move to your archive. Restore them anytime if you feel rusty.
+1. **Concepts (home)** — 21 grammar/conversation lessons with guides and quizzes. Each quiz attempt serves a different question set: 3 hand-written versions plus AI-generated variants (DeepSeek), shuffled every time. Score below 100% and the lesson comes back tomorrow; string perfect scores together and reviews space out (+1d → +3d → +7d → +30d → mastered). A "Due today" queue pins today's work to the top.
+2. **Flashcards with spaced repetition** — cards are only served when due (SM-2 lite: "Don't know" repeats in-session, "Know" doubles the interval, capped at 60 days). Mastered cards (3 consecutive or 5 total "Know") auto-archive.
+3. **Translate** (`/translate`) — Paste text in Spanish, Romanian, Galician, or English and get a natural translation powered by DeepSeek, with flashcards auto-extracted from the result.
+4. **Hourly notifications** — every hour (8:00–22:00 in your timezone) a push with an interesting Spanish sentence + translation; every third one is a "say it out loud in real life" mission, and some draws come from your own flashcards.
+5. **Manage data** (`/settings`) — delete filler translations and their flashcards, individually or in bulk.
 
 ## Tech Stack
 
 - **Framework**: Next.js 15 (App Router)
 - **Styling**: Tailwind CSS + shadcn/ui
 - **Storage**: localStorage by default; optional Firebase (Auth + Firestore) for cloud sync and push notifications
-- **Translation & Flashcard Generation**: DeepSeek Chat API
+- **Translation, Flashcard & Quiz Generation**: DeepSeek Chat API
 - **PWA**: Installable on iOS and Android
 
 ## Quick Start (localStorage only, no account needed)
@@ -51,7 +52,7 @@ NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID=G-XXXXXXXXXX
 NEXT_PUBLIC_VAPID_PUBLIC_KEY=your_vapid_public_key
 VAPID_PRIVATE_KEY=your_vapid_private_key
 
-# Optional — secures the Vercel cron job that sends daily reminders
+# Optional — secures the Vercel cron job that sends hourly sentence notifications
 CRON_SECRET=any_random_string_at_least_16_chars
 ```
 
@@ -71,6 +72,8 @@ The app is configured for [Vercel](https://vercel.com/).
 4. Optionally add Firebase `NEXT_PUBLIC_*` variables for cloud features
 5. If you want push notifications, also add `NEXT_PUBLIC_VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, and `CRON_SECRET`
 
+> 🔔 Notifications run on an **hourly Vercel Cron** (see `vercel.json`) — hourly schedules require a Vercel **Pro** plan (on Hobby, lower the frequency in `vercel.json`). After deploying, toggle the notification bell off and on once so your subscription records your timezone — quiet hours (22:00–08:00 local) depend on it.
+
 ## PWA Install
 
 Open the deployed app in Safari (iOS) or Chrome (Android) and tap **Add to Home Screen**.
@@ -87,15 +90,15 @@ The app currently assumes **Spanish → English** as the primary learning pair. 
 
 #### Switch the entire app to a different language pair
 
-> **Instruction for your AI agent:** "Change this app from a Spanish→English tutor to a [YOUR TARGET LANGUAGE]→[YOUR NATIVE LANGUAGE] tutor. Update the default source and target languages, the language list, all 22 grammar/concept lessons and their quizzes, the auto-suggestion keyword matching system, and the DeepSeek system prompt. Replace every Spanish example with equivalent content in [YOUR TARGET LANGUAGE] and every English translation with [YOUR NATIVE LANGUAGE]."
+> **Instruction for your AI agent:** "Change this app from a Spanish→English tutor to a [YOUR TARGET LANGUAGE]→[YOUR NATIVE LANGUAGE] tutor. Update the default source and target languages, the language list, all 21 grammar/concept lessons and their quizzes, the auto-suggestion keyword matching system, and the DeepSeek system prompt. Replace every Spanish example with equivalent content in [YOUR TARGET LANGUAGE] and every English translation with [YOUR NATIVE LANGUAGE]."
 
 **Files to change:**
 | File | What's Hardcoded |
 |------|-----------------|
 | `types/index.ts` | `LANGUAGES` array (en, ro, es, gl), `DEFAULT_SOURCE_LANG = "es"`, `DEFAULT_TARGET_LANG = "en"` |
 | `app/api/translate/route.ts` | `SYSTEM_PROMPT` instructs DeepSeek about translation direction and flashcard tags `["vocabulary", "phrase", "grammar"]` |
-| `app/page.tsx` | `CONCEPT_KEYWORDS` — 22 concept detectors with Spanish-specific keywords (e.g., `"estuve"`, `"ojalá"`, `"vale"`). The `suggestConcepts()` function matches against these. |
-| `lib/concepts-data.ts` | `CONCEPTS` array — 22 full lessons with Spanish examples, English translations, and English-language explanations. Covers ser/estar, subjunctive, false friends, colloquialisms, etc. |
+| `app/translate/page.tsx` | `CONCEPT_KEYWORDS` — 21 concept detectors with Spanish-specific keywords (e.g., `"estuve"`, `"ojalá"`, `"vale"`). The `suggestConcepts()` function matches against these. |
+| `lib/concepts-data.ts` | `CONCEPTS` array — 21 full lessons with Spanish examples, English translations, and English-language explanations. Covers ser/estar, subjunctive, false friends, colloquialisms, etc. |
 | `lib/quiz-data.ts` | `QUIZZES` mapping — 3 quiz versions per concept, all in Spanish/English. |
 
 #### Add or remove supported languages
@@ -191,7 +194,7 @@ Firebase is **optional**. Without it, everything saves to the browser's localSto
 
 > **Instruction:** "Add a new concept '[TITLE]' for [LANGUAGE] learners about [TOPIC]. Include 3-4 paragraphs of explanation, 4-6 example sentence pairs, tips, and 3 quiz versions with 6 questions each."
 
-**Files:** `lib/concepts-data.ts` — add entry to `CONCEPTS` array. `lib/quiz-data.ts` — add entry to `QUIZZES` object. `app/page.tsx` — add keyword detector to `CONCEPT_KEYWORDS` object.
+**Files:** `lib/concepts-data.ts` — add entry to `CONCEPTS` array. `lib/quiz-data.ts` — add entry to `QUIZZES` object. `app/translate/page.tsx` — add keyword detector to `CONCEPT_KEYWORDS` object.
 
 #### Modify an existing concept
 
@@ -203,7 +206,7 @@ Firebase is **optional**. Without it, everything saves to the browser's localSto
 
 > **Instruction:** "Remove the '[CONCEPT TITLE]' concept entirely from the app, including its quizzes and keyword suggestions."
 
-**Files:** `lib/concepts-data.ts`, `lib/quiz-data.ts`, `app/page.tsx` (CONCEPT_KEYWORDS entry).
+**Files:** `lib/concepts-data.ts`, `lib/quiz-data.ts`, `app/translate/page.tsx` (CONCEPT_KEYWORDS entry).
 
 ---
 
@@ -213,7 +216,7 @@ Firebase is **optional**. Without it, everything saves to the browser's localSto
 
 > **Instruction:** "When a translation is saved, suggest concepts based on [DIFFERENT CRITERIA] instead of keyword matching. Or increase/reduce the number of suggested concepts."
 
-**File:** `app/page.tsx` — the `suggestConcepts()` function and `CONCEPT_KEYWORDS` object.
+**File:** `app/translate/page.tsx` — the `suggestConcepts()` function and `CONCEPT_KEYWORDS` object.
 
 #### Change flashcard mastery threshold
 
@@ -239,13 +242,18 @@ All custom data flows through these files — understanding them is the key to c
 | `lib/db.ts` | Dispatcher — calls Firestore or localStorage based on config |
 | `lib/local-db.ts` | localStorage mirror of the full Firestore API |
 | `lib/firebase.ts` | Firebase initialization from env vars, exports `isFirebaseConfigured` |
-| `lib/concepts-data.ts` | 22 Spanish grammar/conversation concept lessons |
+| `lib/concepts-data.ts` | 21 Spanish grammar/conversation concept lessons |
 | `lib/quiz-data.ts` | 3 quiz versions per concept |
+| `lib/notifications.ts` | Push subscribe/unsubscribe + personal sentence mirroring for notifications |
 | `app/api/translate/route.ts` | DeepSeek API integration and LLM prompt |
-| `app/page.tsx` | Translation page + concept suggestion engine |
+| `app/api/quiz-variant/route.ts` | AI quiz variant generation (DeepSeek), cached per concept per user |
+| `app/api/notify/route.ts` | Hourly sentence push notifications (Vercel Cron + web-push) |
+| `app/page.tsx` | Redirects to `/concepts` |
+| `app/translate/page.tsx` | Translation page + concept suggestion engine |
 | `app/flashcards/page.tsx` | Spaced-repetition flashcard practice |
-| `app/concepts/page.tsx` | Concept browser, quiz player, self-assessment |
+| `app/concepts/page.tsx` | Concept browser, due-today queue, quiz player, review scheduling |
 | `app/mastered/page.tsx` | Archived/mastered cards gallery |
+| `app/settings/page.tsx` | Manage data — delete translations and flashcards |
 | `app/layout.tsx` | Root layout, metadata, fonts, color theme |
 
 All Firestore reads/writes require authentication. Security rules are not included in this repo — configure them in the Firebase console.

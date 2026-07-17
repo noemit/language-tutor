@@ -8,6 +8,7 @@ import {
   ConceptProgress,
   ConceptStatus,
   QuizAttempt,
+  GeneratedQuiz,
 } from "@/types";
 
 interface LocalSuggestion {
@@ -26,7 +27,11 @@ interface LocalData {
   conceptProgress: ConceptProgress[];
   quizAttempts: QuizAttempt[];
   suggestions: LocalSuggestion[];
+  generatedQuizzes: GeneratedQuiz[];
 }
+
+/** Max generated quiz variants kept per concept */
+export const MAX_GENERATED_QUIZZES_PER_CONCEPT = 10;
 
 const STORAGE_KEY = "langtutor_data";
 
@@ -46,7 +51,12 @@ export function getLocalUserId(): string {
 function load(): LocalData {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) return JSON.parse(raw);
+    if (raw) {
+      const data = JSON.parse(raw) as LocalData;
+      // Guard for data written before new collections were added
+      if (!Array.isArray(data.generatedQuizzes)) data.generatedQuizzes = [];
+      return data;
+    }
   } catch { /* ignore corrupt data */ }
   return {
     userId: getUserId(),
@@ -56,6 +66,7 @@ function load(): LocalData {
     conceptProgress: [],
     quizAttempts: [],
     suggestions: [],
+    generatedQuizzes: [],
   };
 }
 
@@ -96,6 +107,28 @@ export async function localCreateTranslation(
 
 export async function localGetTranslations(): Promise<Translation[]> {
   return load().translations;
+}
+
+export async function localDeleteTranslation(translationId: string) {
+  const db = load();
+  const translation = db.translations.find((t) => t.id === translationId);
+  const cardIds = new Set(translation?.flashcardIds || []);
+  db.translations = db.translations.filter((t) => t.id !== translationId);
+  // Deleting a translation also removes the flashcards it generated
+  if (cardIds.size > 0) {
+    db.flashcards = db.flashcards.filter((c) => !cardIds.has(c.id));
+  }
+  save(db);
+}
+
+export async function localDeleteAllTranslations() {
+  const db = load();
+  const cardIds = new Set(db.translations.flatMap((t) => t.flashcardIds || []));
+  db.translations = [];
+  if (cardIds.size > 0) {
+    db.flashcards = db.flashcards.filter((c) => !cardIds.has(c.id));
+  }
+  save(db);
 }
 
 // ---------------------------------------------------------------------------
@@ -168,6 +201,12 @@ export async function localRestoreFlashcard(cardId: string) {
   }
 }
 
+export async function localDeleteFlashcard(cardId: string) {
+  const db = load();
+  db.flashcards = db.flashcards.filter((c) => c.id !== cardId);
+  save(db);
+}
+
 // ---------------------------------------------------------------------------
 // Attempts
 // ---------------------------------------------------------------------------
@@ -205,12 +244,13 @@ export async function localGetAttempts(cardId?: string): Promise<Attempt[]> {
 
 export async function localSetConceptProgress(
   conceptId: string,
-  status: ConceptStatus
+  status: ConceptStatus,
+  extra?: Partial<Omit<ConceptProgress, "id" | "userId" | "conceptId" | "status" | "updatedAt">>
 ) {
   const db = load();
   const idx = db.conceptProgress.findIndex((c) => c.conceptId === conceptId);
   if (idx !== -1) {
-    db.conceptProgress[idx].status = status;
+    db.conceptProgress[idx] = { ...db.conceptProgress[idx], ...extra, status };
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (db.conceptProgress[idx] as any).updatedAt = now();
   } else {
@@ -219,6 +259,7 @@ export async function localSetConceptProgress(
       userId: db.userId,
       conceptId,
       status,
+      ...extra,
       updatedAt: now() as unknown as ConceptProgress["updatedAt"],
     });
   }
@@ -302,4 +343,43 @@ export async function localDismissSuggestion(suggestionId: string) {
     db.suggestions[idx].dismissed = true;
     save(db);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Generated Quizzes (AI quiz variants)
+// ---------------------------------------------------------------------------
+
+export async function localSaveGeneratedQuiz(
+  conceptId: string,
+  questions: GeneratedQuiz["questions"]
+): Promise<{ id: string }> {
+  const db = load();
+  const doc: GeneratedQuiz = {
+    id: generateId(),
+    userId: db.userId,
+    conceptId,
+    questions,
+    createdAt: now() as unknown as GeneratedQuiz["createdAt"],
+  };
+  db.generatedQuizzes.push(doc);
+
+  // Prune: keep only the newest MAX_GENERATED_QUIZZES_PER_CONCEPT per concept
+  const forConcept = db.generatedQuizzes
+    .filter((q) => q.conceptId === conceptId)
+    .sort((a, b) => Date.parse(String(b.createdAt)) - Date.parse(String(a.createdAt)));
+  const keepIds = new Set(forConcept.slice(0, MAX_GENERATED_QUIZZES_PER_CONCEPT).map((q) => q.id));
+  db.generatedQuizzes = db.generatedQuizzes.filter(
+    (q) => q.conceptId !== conceptId || keepIds.has(q.id)
+  );
+
+  save(db);
+  return makeRef(doc.id);
+}
+
+export async function localGetGeneratedQuizzes(
+  conceptId: string
+): Promise<GeneratedQuiz[]> {
+  return load()
+    .generatedQuizzes.filter((q) => q.conceptId === conceptId)
+    .sort((a, b) => Date.parse(String(b.createdAt)) - Date.parse(String(a.createdAt)));
 }

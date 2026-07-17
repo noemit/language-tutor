@@ -2,9 +2,12 @@ import { isFirebaseConfigured, db } from "./firebase";
 import {
   collection,
   doc,
+  getDoc,
   getDocs,
   addDoc,
+  setDoc,
   updateDoc,
+  deleteDoc,
   query,
   where,
   orderBy,
@@ -18,15 +21,20 @@ import {
   Attempt,
   Translation,
   ConceptProgress,
+  GeneratedQuiz,
+  QuizQuestion,
 } from "@/types";
 import {
   localCreateTranslation,
   localGetTranslations,
+  localDeleteTranslation,
+  localDeleteAllTranslations,
   localCreateFlashcard,
   localGetFlashcards,
   localUpdateFlashcard,
   localArchiveFlashcard,
   localRestoreFlashcard,
+  localDeleteFlashcard,
   localRecordAttempt,
   localGetAttempts,
   localSetConceptProgress,
@@ -36,6 +44,9 @@ import {
   localSaveSuggestion,
   localGetSuggestions,
   localDismissSuggestion,
+  localSaveGeneratedQuiz,
+  localGetGeneratedQuizzes,
+  MAX_GENERATED_QUIZZES_PER_CONCEPT,
 } from "./local-db";
 
 // ---------------------------------------------------------------------------
@@ -75,6 +86,40 @@ export async function getTranslations(userId: string): Promise<Translation[]> {
   );
   const snapshot = await getDocs(q);
   return snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as Translation));
+}
+
+/** Delete a translation plus every flashcard it generated. */
+export async function deleteTranslation(
+  userId: string,
+  translationId: string
+): Promise<void> {
+  if (!isFirebaseConfigured) return localDeleteTranslation(translationId);
+
+  const ref = userDoc(userId, "translations", translationId);
+  const snap = await getDoc(ref);
+  const flashcardIds: string[] = snap.data()?.flashcardIds || [];
+  await Promise.all([
+    ...flashcardIds.map((id) =>
+      deleteDoc(userDoc(userId, "flashcards", id)).catch(() => {})
+    ),
+    deleteDoc(ref),
+  ]);
+}
+
+/** Delete every translation plus all flashcards they generated. */
+export async function deleteAllTranslations(userId: string): Promise<void> {
+  if (!isFirebaseConfigured) return localDeleteAllTranslations();
+
+  const snapshot = await getDocs(userCollection(userId, "translations"));
+  const ops: Promise<unknown>[] = [];
+  for (const d of snapshot.docs) {
+    const flashcardIds: string[] = d.data().flashcardIds || [];
+    for (const id of flashcardIds) {
+      ops.push(deleteDoc(userDoc(userId, "flashcards", id)).catch(() => {}));
+    }
+    ops.push(deleteDoc(d.ref));
+  }
+  await Promise.all(ops);
 }
 
 // ---------------------------------------------------------------------------
@@ -156,6 +201,12 @@ export async function restoreFlashcard(userId: string, cardId: string) {
   });
 }
 
+export async function deleteFlashcard(userId: string, cardId: string) {
+  if (!isFirebaseConfigured) return localDeleteFlashcard(cardId);
+
+  return deleteDoc(userDoc(userId, "flashcards", cardId));
+}
+
 // ---------------------------------------------------------------------------
 // Attempts
 // ---------------------------------------------------------------------------
@@ -196,26 +247,23 @@ export async function getAttempts(
 export async function setConceptProgress(
   userId: string,
   conceptId: string,
-  status: ConceptProgress["status"]
+  status: ConceptProgress["status"],
+  extra?: Partial<Omit<ConceptProgress, "id" | "userId" | "conceptId" | "status" | "updatedAt">>
 ): Promise<void> {
-  if (!isFirebaseConfigured) return localSetConceptProgress(conceptId, status);
+  if (!isFirebaseConfigured) return localSetConceptProgress(conceptId, status, extra);
 
+  // setDoc + merge: creates the doc on first write and never duplicates
   const ref = userDoc(userId, "conceptProgress", conceptId);
-  await updateDoc(ref, {
-    status,
-    updatedAt: serverTimestamp(),
-  } as Record<string, unknown>).catch(async (err: unknown) => {
-    const fbErr = err as FirestoreError;
-    if (fbErr.code === "not-found") {
-      await addDoc(userCollection(userId, "conceptProgress"), {
-        conceptId,
-        status,
-        updatedAt: serverTimestamp(),
-      });
-    } else {
-      throw err;
-    }
-  });
+  await setDoc(
+    ref,
+    {
+      conceptId,
+      status,
+      ...extra,
+      updatedAt: serverTimestamp(),
+    } as Record<string, unknown>,
+    { merge: true }
+  );
 }
 
 export async function getConceptProgress(
@@ -334,4 +382,68 @@ export async function dismissSuggestion(userId: string, suggestionId: string) {
   return updateDoc(userDoc(userId, "suggestions", suggestionId), {
     dismissed: true,
   });
+}
+
+// ---------------------------------------------------------------------------
+// Generated Quizzes (AI quiz variants)
+// ---------------------------------------------------------------------------
+
+export async function saveGeneratedQuiz(
+  userId: string,
+  conceptId: string,
+  questions: QuizQuestion[]
+): Promise<DocumentReference | { id: string }> {
+  if (!isFirebaseConfigured) return localSaveGeneratedQuiz(conceptId, questions);
+
+  const ref = await addDoc(userCollection(userId, "generatedQuizzes"), {
+    conceptId,
+    questions,
+    createdAt: serverTimestamp(),
+  });
+
+  // Prune: keep only the newest MAX_GENERATED_QUIZZES_PER_CONCEPT per concept
+  try {
+    const q = query(
+      userCollection(userId, "generatedQuizzes"),
+      where("conceptId", "==", conceptId),
+      orderBy("createdAt", "desc")
+    );
+    const snapshot = await getDocs(q);
+    const stale = snapshot.docs.slice(MAX_GENERATED_QUIZZES_PER_CONCEPT);
+    await Promise.all(stale.map((d) => deleteDoc(d.ref)));
+  } catch (err) {
+    console.warn("Failed to prune generated quizzes:", err);
+  }
+
+  return ref;
+}
+
+export async function getGeneratedQuizzes(
+  userId: string,
+  conceptId: string
+): Promise<GeneratedQuiz[]> {
+  if (!isFirebaseConfigured) return localGetGeneratedQuizzes(conceptId);
+
+  try {
+    const q = query(
+      userCollection(userId, "generatedQuizzes"),
+      where("conceptId", "==", conceptId),
+      orderBy("createdAt", "desc")
+    );
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as GeneratedQuiz));
+  } catch {
+    // Missing composite index on first deploys — fall back to unsorted query
+    const q = query(
+      userCollection(userId, "generatedQuizzes"),
+      where("conceptId", "==", conceptId)
+    );
+    const snapshot = await getDocs(q);
+    return snapshot.docs
+      .map((d) => ({ id: d.id, ...d.data() } as GeneratedQuiz))
+      .sort(
+        (a, b) =>
+          (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0)
+      );
+  }
 }

@@ -1,9 +1,10 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { Button } from "@/components/ui/button";
-import { LogOut, User, Bell, BellOff, HardDrive } from "lucide-react";
+import { LogOut, User, Bell, BellOff, HardDrive, Settings } from "lucide-react";
 import {
   requestNotificationPermission,
   subscribeToPush,
@@ -54,7 +55,7 @@ export function AppHeader() {
     if (result.success) {
       setNotificationsEnabled(true);
       toast.success("Notifications enabled! 🔔", {
-        description: "You'll get 3 reminders a day.",
+        description: "You'll get an interesting Spanish sentence every hour (8:00–22:00).",
       });
       const test = await sendTestNotification();
       if (test.ok) {
@@ -106,6 +107,16 @@ export function AppHeader() {
           )}
         </div>
         <div className="flex items-center gap-1">
+          <Link href="/settings">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="rounded-xl h-9 w-9"
+              title="Manage data"
+            >
+              <Settings className="w-4 h-4 text-muted-foreground" />
+            </Button>
+          </Link>
           <Button
             variant="ghost"
             size="icon"

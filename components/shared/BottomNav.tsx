@@ -5,9 +5,9 @@ import { usePathname } from "next/navigation";
 import { Languages, BookOpen, Lightbulb, Trophy } from "lucide-react";
 
 const navItems = [
-  { href: "/", label: "Translate", icon: Languages },
-  { href: "/flashcards", label: "Flashcards", icon: BookOpen },
   { href: "/concepts", label: "Concepts", icon: Lightbulb },
+  { href: "/flashcards", label: "Flashcards", icon: BookOpen },
+  { href: "/translate", label: "Translate", icon: Languages },
   { href: "/mastered", label: "Mastered", icon: Trophy },
 ];
 

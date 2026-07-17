@@ -13,13 +13,47 @@ import { toast } from "sonner";
 const MASTERY_THRESHOLD_TOTAL = 5;
 const MASTERY_THRESHOLD_STREAK = 3;
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+const DEFAULT_EASE = 2.2;
+const MAX_INTERVAL_DAYS = 60;
+
 type ConfidenceLevel = "dont-know" | "sort-of-know" | "know";
+
+/** Human-friendly "in ~X hours/days" for the next due time. */
+function formatDueIn(ts: number): string {
+  const diff = ts - Date.now();
+  if (diff <= 0) return "now";
+  const hours = Math.round(diff / (60 * 60 * 1000));
+  if (hours < 1) return "in under an hour";
+  if (hours < 24) return `in ~${hours} hour${hours > 1 ? "s" : ""}`;
+  const days = Math.round(hours / 24);
+  return `in ~${days} day${days > 1 ? "s" : ""}`;
+}
 
 interface SessionStats {
   dontKnow: number;
   sortOfKnow: number;
   know: number;
   total: number;
+}
+
+/** SM-2 lite: compute the next review schedule from the confidence answer. */
+function nextSchedule(card: Flashcard, level: ConfidenceLevel): { intervalDays: number; dueAt: number } {
+  const prevInterval = card.intervalDays ?? 0;
+  const ease = card.easeFactor ?? DEFAULT_EASE;
+  const now = Date.now();
+
+  if (level === "dont-know") {
+    // Stays due — the card is also re-queued within this session
+    return { intervalDays: 0, dueAt: now };
+  }
+  if (level === "sort-of-know") {
+    const interval = Math.max(1, prevInterval);
+    return { intervalDays: interval, dueAt: now + interval * DAY_MS };
+  }
+  // know
+  const interval = prevInterval <= 0 ? 1 : Math.min(Math.round(prevInterval * ease), MAX_INTERVAL_DAYS);
+  return { intervalDays: interval, dueAt: now + interval * DAY_MS };
 }
 
 export default function FlashcardsPage() {
@@ -35,17 +69,30 @@ export default function FlashcardsPage() {
     know: 0,
     total: 0,
   });
+  const [activeCount, setActiveCount] = useState(0);
+  const [nextDueAt, setNextDueAt] = useState<number | null>(null);
 
-  const loadCards = useCallback(async () => {
+  const loadCards = useCallback(async (mode: "due" | "all" = "due") => {
     if (!user) return;
     setIsLoading(true);
     try {
+      const now = Date.now();
       const activeCards = await getFlashcards(user.uid, "active");
       // Filter out cards that already achieved mastery
       const unmastered = activeCards.filter((c) => !c.masteryAchieved);
-      // Simple shuffle
-      const shuffled = [...unmastered].sort(() => Math.random() - 0.5);
-      setCards(shuffled);
+      // Spaced repetition: only cards whose review time has arrived (missing dueAt = due now)
+      const due = unmastered
+        .filter((c) => (c.dueAt ?? 0) <= now)
+        .sort((a, b) => (a.dueAt ?? 0) - (b.dueAt ?? 0));
+      const upcoming = unmastered
+        .map((c) => c.dueAt)
+        .filter((d): d is number => d != null && d > now);
+
+      setActiveCount(unmastered.length);
+      setNextDueAt(upcoming.length > 0 ? Math.min(...upcoming) : null);
+
+      const pool = mode === "all" ? [...unmastered].sort(() => Math.random() - 0.5) : due;
+      setCards(pool);
       setCurrentIndex(0);
       setSessionComplete(false);
       setSessionStats({ dontKnow: 0, sortOfKnow: 0, know: 0, total: 0 });
@@ -90,12 +137,18 @@ export default function FlashcardsPage() {
       const newConsecutiveKnowStreak = level === "know" ? (card.consecutiveKnowStreak || 0) + 1 : 0;
       const masteryAchieved = newConsecutiveKnowStreak >= MASTERY_THRESHOLD_STREAK || newMasteryCount >= MASTERY_THRESHOLD_TOTAL;
 
+      // Spaced repetition schedule for the next review
+      const schedule = nextSchedule(card, level);
+
       await updateFlashcard(user.uid, card.id, {
         totalAttempts: newTotal,
         correctStreak: newStreak,
         masteryCount: newMasteryCount,
         consecutiveKnowStreak: newConsecutiveKnowStreak,
         masteryAchieved,
+        intervalDays: schedule.intervalDays,
+        dueAt: schedule.dueAt,
+        easeFactor: card.easeFactor ?? DEFAULT_EASE,
         lastAttemptAt: serverTimestamp(),
       } as any);
 
@@ -114,7 +167,21 @@ export default function FlashcardsPage() {
         total: s.total + 1,
       }));
 
-      moveToNextCard();
+      // "Don't know" cards go to the back of the queue so you see them again this session
+      const willRequeue = level === "dont-know";
+      if (willRequeue) {
+        setCards((prev) => [
+          ...prev,
+          { ...card, totalAttempts: newTotal, intervalDays: 0, dueAt: schedule.dueAt },
+        ]);
+      }
+
+      if (currentIndex + 1 >= cards.length && !willRequeue) {
+        setSessionComplete(true);
+      } else {
+        setCurrentIndex((i) => i + 1);
+        setIsFlipped(false);
+      }
     } catch (e) {
       toast.error("Failed to save progress");
     }
@@ -162,15 +229,37 @@ export default function FlashcardsPage() {
   }
 
   if (cards.length === 0) {
+    // No active cards at all
+    if (activeCount === 0) {
+      return (
+        <div className="flex flex-col flex-1 items-center justify-center px-6 gap-4">
+          <BookOpen className="w-12 h-12 text-muted-foreground" />
+          <div className="text-center">
+            <h2 className="text-lg font-semibold text-foreground">No flashcards to review</h2>
+            <p className="text-muted-foreground mt-1">
+              All your cards are mastered! Translate some text to generate new cards.
+            </p>
+          </div>
+        </div>
+      );
+    }
+
+    // Cards exist but none are due — spaced repetition doing its job
     return (
       <div className="flex flex-col flex-1 items-center justify-center px-6 gap-4">
-        <BookOpen className="w-12 h-12 text-muted-foreground" />
+        <Trophy className="w-12 h-12 text-primary" />
         <div className="text-center">
-          <h2 className="text-lg font-semibold text-foreground">No flashcards to review</h2>
+          <h2 className="text-lg font-semibold text-foreground">All caught up!</h2>
           <p className="text-muted-foreground mt-1">
-            All your cards are mastered! Translate some text to generate new cards.
+            {nextDueAt
+              ? `Next card due ${formatDueIn(nextDueAt)}. Come back then — spacing is what makes it stick.`
+              : "Nothing scheduled right now."}
           </p>
         </div>
+        <Button variant="outline" onClick={() => loadCards("all")} className="h-11 px-6 rounded-xl">
+          <RotateCcw className="w-4 h-4 mr-2" />
+          Practice anyway ({activeCount} cards)
+        </Button>
       </div>
     );
   }
@@ -192,7 +281,7 @@ export default function FlashcardsPage() {
             {sessionStats.know} / {sessionStats.total} fully correct
           </p>
         </div>
-        <Button onClick={loadCards} className="h-12 px-6 rounded-xl">
+        <Button onClick={() => loadCards()} className="h-12 px-6 rounded-xl">
           <RotateCcw className="w-4 h-4 mr-2" />
           Practice again
         </Button>

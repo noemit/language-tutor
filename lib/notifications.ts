@@ -76,6 +76,8 @@ export async function subscribeToPush(userId: string): Promise<{ success: boolea
       doc(db, "pushSubscriptions", userId),
       {
         subscription: subscription.toJSON(),
+        // Stored so the notify route can respect quiet hours (8:00–22:00 local)
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         updatedAt: new Date(),
       },
       { merge: true }
@@ -131,5 +133,37 @@ export async function sendTestNotification(): Promise<{
     const msg = err instanceof Error ? err.message : String(err);
     console.error("Test notification failed:", err);
     return { ok: false, error: msg };
+  }
+}
+
+/**
+ * Mirror a handful of the user's own flashcard sentences into the
+ * world-readable `pushSentences/{userId}` doc, so the hourly notify cron can
+ * personalize notifications without needing the Firebase Admin SDK.
+ * Fire-and-forget: failures should never block the translate flow.
+ */
+export async function mirrorPushSentences(userId: string): Promise<void> {
+  if (!db) return; // local mode — no push, nothing to mirror
+  try {
+    const { getFlashcards } = await import("@/lib/db");
+    const cards = await getFlashcards(userId, "active");
+    const sentences = cards
+      .filter(
+        (c) =>
+          c.langPair[0] === "es" &&
+          c.front.length >= 10 &&
+          c.front.length <= 90 &&
+          c.front.trim().includes(" ")
+      )
+      .slice(0, 12)
+      .map((c) => ({ es: c.front, en: c.back }));
+    if (sentences.length === 0) return;
+    await setDoc(
+      doc(db, "pushSentences", userId),
+      { sentences, updatedAt: new Date() },
+      { merge: true }
+    );
+  } catch (err) {
+    console.warn("Failed to mirror push sentences:", err);
   }
 }
