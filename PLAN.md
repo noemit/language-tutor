@@ -365,3 +365,30 @@ interface Attempt {
 - [ ] Cards auto-archive after 7 correct answers in a row.
 - [ ] Can view history and restore archived cards.
 - [ ] App is installable as a PWA on iOS Safari and Android Chrome.
+
+---
+
+## 12. Production-Practice Modes (follow-on phases)
+
+The phases in §9 are complete and shipped. What follows is a second build wave on top of that base.
+
+### Why
+
+Flashcards train recognition — reading a cue and recalling the answer silently. The real failure mode is freezing mid-conversation: the learner knows the material but can't produce it out loud under time pressure. These phases shift practice toward **out-loud production, self-graded**: the app shows an English prompt, the learner says the Spanish aloud, taps to reveal, and honestly grades Froze / Close / Nailed it. Grading honesty beats algorithmic precision — scheduling is SM-2-lite, not Anki.
+
+### New surfaces
+
+- **`/frames`** — frame drills. A frame is a reusable Spanish template with fill slots (35 frames × 7 scenario variants). The app shows an English variant; the learner produces the Spanish, reveals (Spanish + template with fills highlighted), self-grades. Progress in new `FrameProgress` type with `getFrameProgress`/`upsertFrameProgress` in both `lib/db.ts` and `lib/local-db.ts`. "Frames" tab added to BottomNav.
+- **`/daily`** — tense of the day. One verb, one English sentence; the learner conjugates it aloud in present / preterite / imperfect / future, then reveals all four and self-grades. Grades in localStorage (`dailyGrades`); weak verbs resurface sooner (`lib/daily.ts`). Push notifications (`app/api/notify`) rotate mod-4 and one slot deep-links the tense of the day to `/daily`.
+- **Reverse flashcards + quick round** (`/flashcards`) — session direction toggle: ES→EN, EN→ES, or Mixed (default). EN→ES forces production instead of recognition; attempts record the real direction. "Quick practice (3)" is a 3-card speed round. `FlashcardCard` gained a `reversed` prop.
+- **Chunk unpack** — `/api/unpack` route + a collapsible "Heard something?" card on the translate page. Paste a phrase heard in the wild; DeepSeek returns the corrected phrase, meaning, usage notes, a reusable frame, 3 examples, and common confusions (`UnpackResponse` type). "Save to flashcards" turns the examples into cards tagged `["chunk","heard-it"]`.
+
+### Content pipeline
+
+Static learning content is generated, not hand-written:
+
+```
+node scripts/generate-content.mjs frames|tense [--write]
+```
+
+Calls DeepSeek, writes to gitignored `scripts/out/` for review; reviewed output is committed by hand as typed consts in `lib/frames-data.ts` (35 frames × 7 scenarios) and `lib/tense-data.ts` (30 tense entries × 10 verbs). New types: `Frame`, `TenseEntry` in `types/index.ts`.

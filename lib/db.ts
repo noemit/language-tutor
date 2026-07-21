@@ -23,6 +23,7 @@ import {
   ConceptProgress,
   GeneratedQuiz,
   QuizQuestion,
+  FrameProgress,
 } from "@/types";
 import {
   localCreateTranslation,
@@ -46,6 +47,8 @@ import {
   localDismissSuggestion,
   localSaveGeneratedQuiz,
   localGetGeneratedQuizzes,
+  localUpsertFrameProgress,
+  localGetFrameProgress,
   MAX_GENERATED_QUIZZES_PER_CONCEPT,
 } from "./local-db";
 
@@ -286,6 +289,40 @@ export async function getConceptProgress(
       (d) => ({ id: d.id, ...d.data() } as ConceptProgress)
     );
   }
+}
+
+// ---------------------------------------------------------------------------
+// Frame Progress
+// ---------------------------------------------------------------------------
+
+export async function upsertFrameProgress(
+  userId: string,
+  frameId: string,
+  patch: Partial<Omit<FrameProgress, "id" | "userId" | "frameId">>
+): Promise<void> {
+  if (!isFirebaseConfigured) return localUpsertFrameProgress(frameId, patch);
+
+  // setDoc + merge: creates the doc on first write and never duplicates.
+  // Mirrors localUpsertFrameProgress: seed zero counters on first write.
+  const ref = userDoc(userId, "frameProgress", frameId);
+  const snap = await getDoc(ref);
+  const base = snap.exists()
+    ? { userId, frameId }
+    : { userId, frameId, nailedStreak: 0, froze: 0, close: 0, nailed: 0 };
+  await setDoc(ref, { ...base, ...patch } as Record<string, unknown>, {
+    merge: true,
+  });
+}
+
+export async function getFrameProgress(
+  userId: string
+): Promise<FrameProgress[]> {
+  if (!isFirebaseConfigured) return localGetFrameProgress();
+
+  const snapshot = await getDocs(userCollection(userId, "frameProgress"));
+  return snapshot.docs.map(
+    (d) => ({ id: d.id, ...d.data() } as FrameProgress)
+  );
 }
 
 // ---------------------------------------------------------------------------

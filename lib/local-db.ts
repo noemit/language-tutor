@@ -9,6 +9,7 @@ import {
   ConceptStatus,
   QuizAttempt,
   GeneratedQuiz,
+  FrameProgress,
 } from "@/types";
 
 interface LocalSuggestion {
@@ -28,6 +29,7 @@ interface LocalData {
   quizAttempts: QuizAttempt[];
   suggestions: LocalSuggestion[];
   generatedQuizzes: GeneratedQuiz[];
+  frameProgress: FrameProgress[];
 }
 
 /** Max generated quiz variants kept per concept */
@@ -55,6 +57,7 @@ function load(): LocalData {
       const data = JSON.parse(raw) as LocalData;
       // Guard for data written before new collections were added
       if (!Array.isArray(data.generatedQuizzes)) data.generatedQuizzes = [];
+      if (!Array.isArray(data.frameProgress)) data.frameProgress = [];
       return data;
     }
   } catch { /* ignore corrupt data */ }
@@ -67,6 +70,7 @@ function load(): LocalData {
     quizAttempts: [],
     suggestions: [],
     generatedQuizzes: [],
+    frameProgress: [],
   };
 }
 
@@ -268,6 +272,37 @@ export async function localSetConceptProgress(
 
 export async function localGetConceptProgress(): Promise<ConceptProgress[]> {
   return load().conceptProgress;
+}
+
+// ---------------------------------------------------------------------------
+// Frame Progress
+// ---------------------------------------------------------------------------
+
+export async function localUpsertFrameProgress(
+  frameId: string,
+  patch: Partial<Omit<FrameProgress, "id" | "userId" | "frameId">>
+) {
+  const db = load();
+  const idx = db.frameProgress.findIndex((f) => f.frameId === frameId);
+  if (idx !== -1) {
+    db.frameProgress[idx] = { ...db.frameProgress[idx], ...patch };
+  } else {
+    db.frameProgress.push({
+      id: generateId(),
+      userId: db.userId,
+      frameId,
+      nailedStreak: 0,
+      froze: 0,
+      close: 0,
+      nailed: 0,
+      ...patch,
+    });
+  }
+  save(db);
+}
+
+export async function localGetFrameProgress(): Promise<FrameProgress[]> {
+  return load().frameProgress;
 }
 
 // ---------------------------------------------------------------------------

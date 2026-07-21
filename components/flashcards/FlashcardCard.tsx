@@ -6,10 +6,17 @@ import { getLanguageName } from "@/lib/languages";
 
 interface FlashcardCardProps {
   card: Flashcard;
+  /** When true, practice the production direction: target language on the front. */
+  reversed?: boolean;
 }
 
-export function FlashcardCard({ card }: FlashcardCardProps) {
+export function FlashcardCard({ card, reversed = false }: FlashcardCardProps) {
   const [flipped, setFlipped] = useState(false);
+
+  const frontText = reversed ? card.back : card.front;
+  const frontLang = card.langPair[reversed ? 1 : 0];
+  const backText = reversed ? card.front : card.back;
+  const backLang = card.langPair[reversed ? 0 : 1];
 
   return (
     <div
@@ -29,10 +36,10 @@ export function FlashcardCard({ card }: FlashcardCardProps) {
           style={{ backfaceVisibility: "hidden" }}
         >
           <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-4">
-            {getLanguageName(card.langPair[0])}
+            {getLanguageName(frontLang)}
           </span>
           <h2 className="text-3xl sm:text-4xl font-bold text-foreground text-center leading-tight">
-            {card.front}
+            {frontText}
           </h2>
           <p className="text-sm text-muted-foreground mt-6">Tap to reveal</p>
         </div>
@@ -46,10 +53,10 @@ export function FlashcardCard({ card }: FlashcardCardProps) {
           }}
         >
           <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-4">
-            {getLanguageName(card.langPair[1])}
+            {getLanguageName(backLang)}
           </span>
           <h2 className="text-2xl sm:text-3xl font-bold text-foreground text-center leading-tight">
-            {card.back}
+            {backText}
           </h2>
           {card.context && (
             <p className="text-sm text-muted-foreground mt-4 text-center italic max-w-xs">

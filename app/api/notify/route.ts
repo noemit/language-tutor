@@ -3,6 +3,8 @@ import webpush from "web-push";
 import { db } from "@/lib/firebase";
 import { doc, getDoc, deleteDoc, collection, getDocs } from "firebase/firestore";
 import { CONCEPTS } from "@/lib/concepts-data";
+import { TENSE_ENTRIES } from "@/lib/tense-data";
+import { baseDailyIndex, dayOfYear } from "@/lib/daily";
 
 // Run fresh on every invocation (cron + manual test should never be cached)
 export const dynamic = "force-dynamic";
@@ -42,8 +44,9 @@ interface NotificationContent {
 /**
  * Picks this hour's content. Deterministic per hour so repeat cron triggers
  * within the same hour don't reshuffle.
- * - hour % 3 === 2: real-life speaking mission
- * - hour % 3 === 1: a sentence from the user's own flashcards (if mirrored)
+ * - hour % 4 === 3: tense of the day (same day-of-year pick as the /daily page)
+ * - hour % 4 === 2: real-life speaking mission
+ * - hour % 4 === 1: a sentence from the user's own flashcards (if mirrored)
  * - otherwise: the next curated sentence from the lesson library
  */
 function pickContent(
@@ -52,7 +55,18 @@ function pickContent(
 ): NotificationContent {
   const curated = SENTENCE_POOL[hourIndex % SENTENCE_POOL.length];
 
-  if (hourIndex % 3 === 2) {
+  if (hourIndex % 4 === 3) {
+    const index = baseDailyIndex(dayOfYear());
+    const entry = TENSE_ENTRIES[index];
+    return {
+      title: "⏳ Tense of the day",
+      body: `"${entry.en}" — say it in present, past & future, then check in the app.`,
+      // Deep link carries the pick so /daily shows this exact entry
+      url: `/daily?e=${index}`,
+    };
+  }
+
+  if (hourIndex % 4 === 2) {
     const mission = SENTENCE_POOL[(hourIndex * 7 + 1) % SENTENCE_POOL.length];
     return {
       title: "🗣️ Real-life mission",
@@ -61,7 +75,7 @@ function pickContent(
     };
   }
 
-  if (hourIndex % 3 === 1 && personal && personal.length > 0) {
+  if (hourIndex % 4 === 1 && personal && personal.length > 0) {
     const own = personal[hourIndex % personal.length];
     return {
       title: own.es,

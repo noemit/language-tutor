@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { ArrowUpDown, CheckCircle2, Languages, Loader2, Sparkles, XCircle } from "lucide-react";
+import { AlertTriangle, ArrowUpDown, CheckCircle2, Ear, Languages, Loader2, Sparkles, XCircle } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -20,7 +20,7 @@ import {
 } from "@/lib/db";
 import { mirrorPushSentences } from "@/lib/notifications";
 import { isFirebaseConfigured } from "@/lib/firebase";
-import { LanguageCode, TranslationResponse, GeneratedFlashcard } from "@/types";
+import { LanguageCode, TranslationResponse, GeneratedFlashcard, UnpackResponse } from "@/types";
 
 // ---------------------------------------------------------------------------
 // Concept keyword detection (unchanged)
@@ -135,6 +135,17 @@ function countSentences(text: string): number {
   const endings = trimmed.match(/[.!?]+(?:\s|$)/g);
   // If no ending punctuation, treat as 1 sentence
   return endings ? endings.length : 1;
+}
+
+/** Normalize a phrase for loose equality: lowercase, no parenthetical note, collapsed whitespace, no trailing punctuation. */
+function normalizePhrase(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/\(.*?\)/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/[.,!?;:"']+$/, "")
+    .trim();
 }
 
 interface ClozeBlank {
@@ -356,6 +367,12 @@ export default function Home() {
   const [result, setResult] = useState<TranslationResponse | null>(null);
   const [isTranslating, setIsTranslating] = useState(false);
   const [cloze, setCloze] = useState<ClozeChallenge | null>(null);
+  const [unpackOpen, setUnpackOpen] = useState(false);
+  const [heardPhrase, setHeardPhrase] = useState("");
+  const [unpackResult, setUnpackResult] = useState<UnpackResponse | null>(null);
+  const [isUnpacking, setIsUnpacking] = useState(false);
+  const [isSavingChunks, setIsSavingChunks] = useState(false);
+  const [chunksSaved, setChunksSaved] = useState(false);
 
   const handleSwap = () => {
     setSourceLang(targetLang);
@@ -462,6 +479,69 @@ export default function Home() {
     }
   };
 
+  const handleUnpack = async () => {
+    if (!heardPhrase.trim() || isUnpacking) return;
+    setIsUnpacking(true);
+    setUnpackResult(null);
+
+    try {
+      const res = await fetch("/api/unpack", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phrase: heardPhrase.trim() }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "Unpack failed");
+      }
+
+      const data: UnpackResponse = await res.json();
+      setUnpackResult(data);
+      setChunksSaved(false);
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Something went wrong");
+    } finally {
+      setIsUnpacking(false);
+    }
+  };
+
+  const handleSaveChunks = async () => {
+    if (!user || !unpackResult || isSavingChunks || chunksSaved) return;
+    setIsSavingChunks(true);
+
+    try {
+      for (const example of unpackResult.examples) {
+        await createFlashcard(user.uid, {
+          front: example.spanish,
+          back: example.english,
+          context: unpackResult.correctedPhrase,
+          langPair: ["es", "en"],
+          tags: ["chunk", "heard-it"],
+          status: "active",
+          totalAttempts: 0,
+          correctStreak: 0,
+          masteryCount: 0,
+          consecutiveKnowStreak: 0,
+          masteryAchieved: false,
+        });
+      }
+      setChunksSaved(true);
+      toast.success(`Saved ${unpackResult.examples.length} flashcards`, {
+        description: "Tap Flashcards to review them",
+        icon: <Sparkles className="w-4 h-4" />,
+      });
+
+      // Refresh the personal sentence pool used by hourly push notifications
+      void mirrorPushSentences(user.uid);
+    } catch (e: unknown) {
+      console.error("Failed to save chunk flashcards:", e);
+      toast.error("Saved locally only — cloud sync failed");
+    } finally {
+      setIsSavingChunks(false);
+    }
+  };
+
   if (authLoading) {
     return (
       <div className="flex flex-col flex-1 items-center justify-center px-6">
@@ -491,6 +571,161 @@ export default function Home() {
 
   return (
     <div className="flex flex-col flex-1 px-4 pt-6 pb-4 gap-4 max-w-lg mx-auto w-full">
+      {/* Heard something? chunk unpack */}
+      <Card className="p-4 rounded-2xl border-border bg-card shadow-none flex flex-col gap-3">
+        <button
+          type="button"
+          onClick={() => setUnpackOpen((o) => !o)}
+          className="flex items-center gap-2 text-left"
+        >
+          <Ear className="w-4 h-4 text-primary shrink-0" />
+          <span className="text-sm font-semibold text-foreground">Heard something?</span>
+          <span className="text-xs text-muted-foreground ml-auto">
+            {unpackOpen ? "Close" : "Unpack a phrase you heard"}
+          </span>
+        </button>
+
+        {unpackOpen && (
+          <>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={heardPhrase}
+                onChange={(e) => {
+                  setHeardPhrase(e.target.value);
+                  setUnpackResult(null);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleUnpack();
+                }}
+                placeholder="e.g. falta dos años"
+                className="flex-1 h-11 px-3 rounded-xl border border-border bg-white text-sm outline-none focus:border-primary placeholder:text-muted-foreground/60"
+              />
+              <Button
+                onClick={handleUnpack}
+                disabled={isUnpacking || !heardPhrase.trim()}
+                className="h-11 rounded-xl text-sm font-semibold"
+              >
+                {isUnpacking ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  "Unpack"
+                )}
+              </Button>
+            </div>
+
+            {unpackResult && (
+              <div className="flex flex-col gap-3 pt-2 border-t border-border">
+                {/* Corrected phrase */}
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1">
+                    What they actually said
+                  </p>
+                  <p
+                    className={`text-lg font-semibold leading-relaxed ${
+                      normalizePhrase(unpackResult.correctedPhrase) !==
+                      normalizePhrase(heardPhrase)
+                        ? "text-primary"
+                        : "text-foreground"
+                    }`}
+                  >
+                    {unpackResult.correctedPhrase}
+                  </p>
+                  <p className="text-sm text-muted-foreground mt-0.5">
+                    {unpackResult.meaning}
+                  </p>
+                </div>
+
+                {/* When natives say it */}
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1">
+                    When natives say it
+                  </p>
+                  <p className="text-sm text-foreground leading-relaxed">
+                    {unpackResult.whenNativesSayIt}
+                  </p>
+                </div>
+
+                {/* Frame + slots */}
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1">
+                    The frame
+                  </p>
+                  <p className="text-base font-semibold text-foreground">
+                    {unpackResult.frame}
+                  </p>
+                  <div className="flex flex-wrap gap-1.5 mt-1.5">
+                    {unpackResult.slots.map((slot, i) => (
+                      <span
+                        key={i}
+                        className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-butter text-foreground"
+                      >
+                        {slot}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Examples */}
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1.5">
+                    Say it yourself
+                  </p>
+                  <div className="flex flex-col gap-2">
+                    {unpackResult.examples.map((ex, i) => (
+                      <div key={i} className="rounded-xl bg-white border border-border px-3 py-2">
+                        <p className="text-sm font-medium text-foreground">{ex.spanish}</p>
+                        <p className="text-xs text-muted-foreground">{ex.english}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Common confusions */}
+                {unpackResult.commonConfusions.length > 0 && (
+                  <div className="rounded-xl bg-blush/60 px-3 py-2.5">
+                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1 flex items-center gap-1">
+                      <AlertTriangle className="w-3 h-3" />
+                      Watch out
+                    </p>
+                    <ul className="flex flex-col gap-1">
+                      {unpackResult.commonConfusions.map((c, i) => (
+                        <li key={i} className="text-xs text-foreground leading-relaxed">
+                          {c}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                <Button
+                  onClick={handleSaveChunks}
+                  disabled={isSavingChunks || chunksSaved}
+                  className="h-11 rounded-xl text-sm font-semibold w-full"
+                >
+                  {isSavingChunks ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Saving...
+                    </>
+                  ) : chunksSaved ? (
+                    <>
+                      <CheckCircle2 className="w-4 h-4 mr-2" />
+                      Saved
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="w-4 h-4 mr-2" />
+                      Save to flashcards
+                    </>
+                  )}
+                </Button>
+              </div>
+            )}
+          </>
+        )}
+      </Card>
+
       {/* Language selectors */}
       <div className="flex items-end gap-2">
         <div className="flex-1">

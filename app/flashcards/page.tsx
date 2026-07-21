@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
-import { BookOpen, Loader2, RotateCcw, Trophy, Crown } from "lucide-react";
+import { useEffect, useState, useCallback, useRef } from "react";
+import { BookOpen, Loader2, RotateCcw, Trophy, Crown, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { FlashcardCard } from "@/components/flashcards/FlashcardCard";
 import { useAuth } from "@/components/auth/AuthProvider";
@@ -18,6 +18,14 @@ const DEFAULT_EASE = 2.2;
 const MAX_INTERVAL_DAYS = 60;
 
 type ConfidenceLevel = "dont-know" | "sort-of-know" | "know";
+type SessionDirection = "es-en" | "en-es" | "mixed";
+
+/** A card in the practice pool plus its assigned direction for this session. */
+interface SessionCard {
+  card: Flashcard;
+  /** true = target language shown on the front (EN→ES), false = ES→EN */
+  reversed: boolean;
+}
 
 /** Human-friendly "in ~X hours/days" for the next due time. */
 function formatDueIn(ts: number): string {
@@ -58,9 +66,9 @@ function nextSchedule(card: Flashcard, level: ConfidenceLevel): { intervalDays: 
 
 export default function FlashcardsPage() {
   const { user, loading: authLoading } = useAuth();
-  const [cards, setCards] = useState<Flashcard[]>([]);
+  const [cards, setCards] = useState<SessionCard[]>([]);
+  const [direction, setDirection] = useState<SessionDirection>("mixed");
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [isFlipped, setIsFlipped] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [sessionComplete, setSessionComplete] = useState(false);
   const [sessionStats, setSessionStats] = useState<SessionStats>({
@@ -71,9 +79,12 @@ export default function FlashcardsPage() {
   });
   const [activeCount, setActiveCount] = useState(0);
   const [nextDueAt, setNextDueAt] = useState<number | null>(null);
+  // How the current pool was loaded — reused when a direction change triggers a reload
+  const loadModeRef = useRef<"due" | "all" | "quick">("due");
 
-  const loadCards = useCallback(async (mode: "due" | "all" = "due") => {
+  const loadCards = useCallback(async (mode: "due" | "all" | "quick" = "due") => {
     if (!user) return;
+    loadModeRef.current = mode;
     setIsLoading(true);
     try {
       const now = Date.now();
@@ -91,8 +102,21 @@ export default function FlashcardsPage() {
       setActiveCount(unmastered.length);
       setNextDueAt(upcoming.length > 0 ? Math.min(...upcoming) : null);
 
-      const pool = mode === "all" ? [...unmastered].sort(() => Math.random() - 0.5) : due;
-      setCards(pool);
+      // "quick": the 3 most-due cards (fall back to the soonest upcoming ones)
+      const soonest = [...unmastered].sort((a, b) => (a.dueAt ?? 0) - (b.dueAt ?? 0));
+      const pool =
+        mode === "all"
+          ? [...unmastered].sort(() => Math.random() - 0.5)
+          : mode === "quick"
+            ? (due.length > 0 ? due : soonest).slice(0, 3)
+            : due;
+      // Assign each card a direction for this session (Mixed = coin flip per card)
+      setCards(
+        pool.map((card) => ({
+          card,
+          reversed: direction === "en-es" ? true : direction === "es-en" ? false : Math.random() < 0.5,
+        }))
+      );
       setCurrentIndex(0);
       setSessionComplete(false);
       setSessionStats({ dontKnow: 0, sortOfKnow: 0, know: 0, total: 0 });
@@ -102,10 +126,10 @@ export default function FlashcardsPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [user]);
+  }, [user, direction]);
 
   useEffect(() => {
-    loadCards();
+    loadCards(loadModeRef.current);
   }, [loadCards]);
 
   const moveToNextCard = useCallback(() => {
@@ -113,20 +137,20 @@ export default function FlashcardsPage() {
       setSessionComplete(true);
     } else {
       setCurrentIndex((i) => i + 1);
-      setIsFlipped(false);
     }
   }, [currentIndex, cards.length]);
 
   const handleAnswer = async (level: ConfidenceLevel) => {
     if (!user || cards.length === 0) return;
-    const card = cards[currentIndex];
+    const current = cards[currentIndex];
+    const card = current.card;
 
     try {
       // Record attempt
       await recordAttempt(user.uid, {
         cardId: card.id,
         correct: level === "know",
-        direction: "front-to-back",
+        direction: current.reversed ? "back-to-front" : "front-to-back",
       });
 
       // Update card stats
@@ -170,9 +194,11 @@ export default function FlashcardsPage() {
       // "Don't know" cards go to the back of the queue so you see them again this session
       const willRequeue = level === "dont-know";
       if (willRequeue) {
+        // Keep the originally assigned direction for re-queued cards;
+        // mirror the just-written DB reset so a later "know" can't inflate mastery
         setCards((prev) => [
           ...prev,
-          { ...card, totalAttempts: newTotal, intervalDays: 0, dueAt: schedule.dueAt },
+          { card: { ...card, totalAttempts: newTotal, masteryCount: 0, consecutiveKnowStreak: 0, correctStreak: 0, intervalDays: 0, dueAt: schedule.dueAt }, reversed: current.reversed },
         ]);
       }
 
@@ -180,7 +206,6 @@ export default function FlashcardsPage() {
         setSessionComplete(true);
       } else {
         setCurrentIndex((i) => i + 1);
-        setIsFlipped(false);
       }
     } catch (e) {
       toast.error("Failed to save progress");
@@ -189,7 +214,7 @@ export default function FlashcardsPage() {
 
   const handleMastered = async () => {
     if (!user || cards.length === 0) return;
-    const card = cards[currentIndex];
+    const card = cards[currentIndex].card;
 
     try {
       // Mark as mastered immediately
@@ -260,6 +285,10 @@ export default function FlashcardsPage() {
           <RotateCcw className="w-4 h-4 mr-2" />
           Practice anyway ({activeCount} cards)
         </Button>
+        <Button variant="outline" onClick={() => loadCards("quick")} className="h-11 px-6 rounded-xl">
+          <Zap className="w-4 h-4 mr-2" />
+          Quick practice (3)
+        </Button>
       </div>
     );
   }
@@ -289,13 +318,47 @@ export default function FlashcardsPage() {
     );
   }
 
-  const currentCard = cards[currentIndex];
+  const current = cards[currentIndex];
+  const currentCard = current.card;
   const progress = `${currentIndex + 1} / ${cards.length}`;
   const masteryDisplay = currentCard.masteryCount || 0;
   const isMastered = currentCard.masteryAchieved || false;
 
   return (
     <div className="flex flex-col flex-1 px-4 pt-6 pb-4 gap-6 max-w-lg mx-auto w-full">
+      {/* Direction toggle + quick round */}
+      <div className="flex items-center justify-between gap-2">
+        <div className="inline-flex bg-muted rounded-full p-1">
+          {(
+            [
+              ["es-en", "ES→EN"],
+              ["en-es", "EN→ES"],
+              ["mixed", "Mixed"],
+            ] as const
+          ).map(([value, label]) => (
+            <button
+              key={value}
+              onClick={() => setDirection(value)}
+              className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${
+                direction === value
+                  ? "bg-white text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <Button
+          variant="ghost"
+          onClick={() => loadCards("quick")}
+          className="h-8 rounded-full text-xs text-muted-foreground hover:text-foreground hover:bg-muted"
+        >
+          <Zap className="w-3.5 h-3.5 mr-1" />
+          Quick (3)
+        </Button>
+      </div>
+
       {/* Progress */}
       <div className="flex items-center justify-between">
         <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
@@ -314,7 +377,7 @@ export default function FlashcardsPage() {
 
       {/* Card */}
       <div className="flex-1 flex flex-col justify-center">
-        <FlashcardCard key={currentCard.id} card={currentCard} />
+        <FlashcardCard key={`${currentCard.id}-${currentIndex}`} card={currentCard} reversed={current.reversed} />
       </div>
 
       {/* Mastery progress bar */}

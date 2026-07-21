@@ -159,8 +159,56 @@ export interface GeneratedQuiz {
   createdAt: Timestamp;
 }
 
+// --- Frame drills ---
+
+export interface Frame {
+  id: string;
+  scenario: string;
+  template: string;
+  english: string;
+  slots: string[][];
+  variants: { spanish: string; english: string }[];
+  tense?: string;
+  note?: string;
+}
+
+export interface FrameProgress {
+  id: string;
+  userId: string;
+  frameId: string;
+  nailedStreak: number;
+  froze: number;
+  close: number;
+  nailed: number;
+  dueAt?: number;
+  intervalDays?: number;
+  easeFactor?: number;
+}
+
+export interface TenseEntry {
+  id: string;
+  verb: string;
+  en: string;
+  present: string;
+  preterite: string;
+  imperfect: string;
+  future: string;
+}
+
 export interface ConceptSuggestion {
   conceptId: string;
   reason: string;
   triggeredAt: Timestamp;
+}
+
+// --- Chunk unpack ("Heard it → use it") ---
+
+export interface UnpackResponse {
+  correctedPhrase: string;
+  meaning: string;
+  whenNativesSayIt: string;
+  frame: string;
+  slots: string[];
+  examples: { spanish: string; english: string }[];
+  commonConfusions: string[];
 }
